@@ -1,14 +1,18 @@
 # Democannon
 
 # How to use Crypto++ library
-* ref : https://rurustory.com/10#google_vignette
-1. download source files : [https://cryptopp.com/downloads.html](https://cryptopp.com/cryptopp890.zip)
-2. Extract zip file
-3. open it with Visual Studio 2022
-4. set cryptlib as start project, because I will use static library.
-5. Build
+* install Crypto++ via vcpkg
+1. install vcpkg
+  1) git clone https://github.com/microsoft/vcpkg.git
+  2) cd vcpkg
+  3) bootstrap-vcpkg.bat
 
+2. install vcpkg
+  1) vcpkg search cryptopp
+  2) vkpkg install cryptopp
 
-
+3. Visual Studio 2022 config
+  1) 구성 속성 > C/C++ > 일반 > 추가 포함 디렉터리: vcpkg 설치 경로 아래의 include 폴더를 추가합니다.
+  2) 구성 속성 > 링커 > 일반 > 추가 라이브러리 디렉터리: vcpkg 설치 경로 아래의 lib 폴더를 추가합니다. 
 
 
