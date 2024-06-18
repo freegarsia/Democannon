@@ -9,7 +9,8 @@
 
 2. install vcpkg
   1) vcpkg search cryptopp
-  2) vkpkg install cryptopp
+  2) vcpkg install cryptopp
+  3) vcpkg integrate install
 
 3. Visual Studio 2022 config
   1) 구성 속성 > C/C++ > 일반 > 추가 포함 디렉터리: vcpkg 설치 경로 아래의 include 폴더를 추가합니다.
