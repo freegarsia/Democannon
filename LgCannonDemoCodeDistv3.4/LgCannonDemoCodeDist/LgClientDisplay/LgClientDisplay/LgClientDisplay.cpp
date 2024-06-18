@@ -17,6 +17,11 @@
 #include "Client.h"
 #include <commdlg.h>
 
+#include <cryptopp/aes.h>
+#include <cryptopp/modes.h>
+#include <cryptopp/filters.h>
+#include <cryptopp/osrng.h>
+#include <cryptopp/base64.h>
 
 #pragma comment(lib,"comctl32.lib")
 #ifdef _DEBUG
@@ -167,7 +172,78 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     INT_PTR ret = DialogBoxW(hInstance, MAKEINTRESOURCE(IDD_LOAD_KEYS), NULL, DialogProc);
     if (ret == IDOK) {
         wchar_t OK_msg[] = L"OK is clicked";
-        MessageBoxW(NULL, OK_msg, NULL, MB_OK);
+        using namespace CryptoPP;
+
+        // AES 키와 IV 설정 (암호화와 복호화에 동일하게 사용해야 함)
+        byte key[AES::DEFAULT_KEYLENGTH] = { /* 16 바이트 키 값 */ };
+        byte iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
+
+        // 원문 설정
+        std::string plaintext = "Hello, Crypto++! This is a test message.";
+
+        // 암호화
+        std::string ciphertext;
+        try
+        {
+            CBC_Mode<AES>::Encryption encryption;
+            encryption.SetKeyWithIV(key, AES::DEFAULT_KEYLENGTH, iv);
+
+            // 암호화된 텍스트를 Base64로 인코딩 (옵션)
+            StringSource(plaintext, true,
+                new StreamTransformationFilter(encryption,
+                    new StringSink(ciphertext)
+                )
+            );
+
+            // Base64 인코딩 (옵션)
+            std::string encoded;
+            StringSource ss(ciphertext, true,
+                new Base64Encoder(
+                    new CryptoPP::StringSink(encoded)
+                )
+            );
+
+            ciphertext = encoded;
+        }
+        catch (const CryptoPP::Exception& e)
+        {
+            std::cerr << "Crypto++ exception: " << e.what() << std::endl;
+            return 1;
+        }
+
+        // 암호화된 텍스트 출력
+        std::cout << "Encrypted text: " << ciphertext << std::endl;
+
+        // 복호화
+        std::string decryptedtext;
+        try
+        {
+            CBC_Mode<AES>::Decryption decryption;
+            decryption.SetKeyWithIV(key, AES::DEFAULT_KEYLENGTH, iv);
+
+            // Base64 디코딩 (옵션)
+            std::string decoded;
+            CryptoPP::StringSource ss(ciphertext, true,
+                new CryptoPP::Base64Decoder(
+                    new CryptoPP::StringSink(decoded)
+                )
+            );
+
+            // 복호화
+            StringSource(decoded, true,
+                new StreamTransformationFilter(decryption,
+                    new StringSink(decryptedtext)
+                )
+            );
+        }
+        catch (const CryptoPP::Exception& e)
+        {
+            std::cerr << "Crypto++ exception: " << e.what() << std::endl;
+            return 1;
+        }
+
+        // 결과 출력
+        std::cout << "Decrypted text: " << decryptedtext << std::endl;
     }
     else if (ret == IDCANCEL) {
         std::cout << "Public key is not selected" << std::endl;
