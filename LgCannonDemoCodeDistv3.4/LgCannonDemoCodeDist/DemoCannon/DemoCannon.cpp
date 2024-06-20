@@ -657,32 +657,36 @@ int main(int argc, const char** argv)
   socklen_t                        clilen;
   chrono::steady_clock::time_point Tbegin, Tend;
 
-  if (argc != 2) {
+    if (argc != 2) {
       fprintf(stderr, "Usage: %s <password>\n", argv[0]);
       exit(EXIT_FAILURE);
-  }
+    }
 
-  const char *password = argv[1];
-  unsigned char* cert = NULL;
-  unsigned char* key = NULL;
-  int cert_len = 0;
-  int key_len = 0;
+    const char *password = argv[1];
+    unsigned char* cert = NULL;
+    unsigned char* key = NULL;
+    int cert_len = 0;
+    int key_len = 0;
 
-  tls_init_openssl();    
-  cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
-  if (cert == NULL) {
+    tls_init_openssl();    
+    cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
+    if (cert == NULL) {
       fprintf(stderr, "Decryption failed.1\n");
       exit(EXIT_FAILURE);    
-  }
-  cert[cert_len] = 0;
-  
-  key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
-  if (cert == NULL) {
+    }
+    cert[cert_len] = 0;
+
+    key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
+    if (cert == NULL) {
       fprintf(stderr, "Decryption failed.2\n");
       exit(EXIT_FAILURE);   
-  }    
-  key[key_len] = 0;
-  
+    }    
+    key[key_len] = 0;
+
+    st_tls tls;
+    tls_init_openssl();
+    tls_create_context(&tls);  
+    tls_configure_context(&tls, cert, key, "ca-cert.pem");
 
  
   ReadOffsets();
@@ -750,7 +754,7 @@ int main(int argc, const char** argv)
 
    printf("Listening for connections\n");
    clilen = sizeof(cli_addr);
-   if  ((TcpConnectedPort=AcceptTcpConnection(TcpListenPort,&cli_addr,&clilen))==NULL)
+   if  ((TcpConnectedPort=AcceptTcpConnection(TcpListenPort,&cli_addr,&clilen, &tls))==NULL)
      {
        printf("AcceptTcpConnection Failed\n");
        return(-1);

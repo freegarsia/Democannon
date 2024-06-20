@@ -38,7 +38,6 @@ openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11
 openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222 
 ==============================================================================================================*/
 
-
 // Buffer size for reading file
 #define BUFFER_SIZE 4096
 
@@ -56,12 +55,17 @@ void tls_handleErrors(void)
     //abort();
 }
 
+void tls_new_set_fd(st_tls* p_this, const int sock)
+{
+    p_this->ssl = SSL_new(p_this->ctx);
+    SSL_set_fd(p_this->ssl, sock);
+}
 
 void tls_cleanup_openssl() {
     EVP_cleanup();
 }
 
-SSL_CTX* tls_create_context() {
+SSL_CTX* tls_create_context(st_tls* p_this) {
     const SSL_METHOD *method;
     SSL_CTX *ctx;
 
@@ -72,6 +76,8 @@ SSL_CTX* tls_create_context() {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
+    if (p_this != NULL)
+        p_this->ctx = ctx;
     return ctx;
 }
 
@@ -100,8 +106,8 @@ void tls_configure_context_file(SSL_CTX *ctx, const char* sz_cert, const char* s
     SSL_CTX_set_verify_depth(ctx, 4);
 }
 
-void tls_configure_context(SSL_CTX *ctx, const char *cert, const char *key, const char* sz_ca_cert) {
-    SSL_CTX_set_ecdh_auto(ctx, 1);
+void tls_configure_context(st_tls* p_this, const unsigned char* cert, const unsigned char* key, const char* sz_ca_cert) {
+    SSL_CTX_set_ecdh_auto(p_this->ctx, 1);
 
     // Load server's certificate and private key from memory
     BIO *cert_bio = BIO_new_mem_buf((void*)cert, -1);
@@ -110,25 +116,25 @@ void tls_configure_context(SSL_CTX *ctx, const char *cert, const char *key, cons
     X509 *certificate = PEM_read_bio_X509(cert_bio, NULL, 0, NULL);
     EVP_PKEY *pkey = PEM_read_bio_PrivateKey(key_bio, NULL, 0, NULL);
 
-    if (SSL_CTX_use_certificate(ctx, certificate) <= 0) {
+    if (SSL_CTX_use_certificate(p_this->ctx, certificate) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
-    if (SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) {
+    if (SSL_CTX_use_PrivateKey(p_this->ctx, pkey) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
     // Set the CA certificate to verify server
-    if (SSL_CTX_load_verify_locations(ctx, sz_ca_cert, NULL) <= 0) {
+    if (SSL_CTX_load_verify_locations(p_this->ctx, sz_ca_cert, NULL) <= 0) {
         ERR_print_errors_fp(stderr);
         exit(EXIT_FAILURE);
     }
 
     // Require server certificate verification
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    SSL_CTX_set_verify_depth(ctx, 4);
+    SSL_CTX_set_verify(p_this->ctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_verify_depth(p_this->ctx, 4);
 
     X509_free(certificate);
     EVP_PKEY_free(pkey);

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "NetworkTCP.h"
+
 //-----------------------------------------------------------------
 // OpenTCPListenPort - Creates a Listen TCP port to accept
 // connection requests
@@ -104,7 +105,7 @@ void CloseTcpListenPort(TTcpListenPort **TcpListenPort)
 // Listening port
 //-----------------------------------------------------------------
 TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort, 
-                       struct sockaddr_in *cli_addr,socklen_t *clilen)
+                       struct sockaddr_in *cli_addr,socklen_t *clilen, st_tls* p_tls)
 {
   TTcpConnectedPort *TcpConnectedPort;
 
@@ -117,6 +118,12 @@ TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
      }
   TcpConnectedPort->ConnectedFd= accept(TcpListenPort->ListenFd,
                       (struct sockaddr *) cli_addr,clilen);
+
+    tls_new_set_fd(p_tls, TcpConnectedPort->ConnectedFd);
+    if (SSL_accept(p_tls->ssl) <= 0) {
+         tls_handleErrors();
+    }
+
 					  
   if (TcpConnectedPort->ConnectedFd== BAD_SOCKET_FD) 
   {

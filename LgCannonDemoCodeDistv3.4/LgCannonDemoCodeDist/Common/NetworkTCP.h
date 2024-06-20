@@ -29,6 +29,7 @@ typedef SSIZE_T ssize_t;
 #define  SOCKET_FD_TYPE int
 #define  BAD_SOCKET_FD  -1
 #endif
+#include <tls.h>
 
 //------------------------------------------------------------------------------------------------
 // Types
@@ -50,7 +51,7 @@ typedef struct
 TTcpListenPort *OpenTcpListenPort(short localport);
 void CloseTcpListenPort(TTcpListenPort **TcpListenPort);
 TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort, 
-                       struct sockaddr_in *cli_addr,socklen_t *clilen);
+                       struct sockaddr_in *cli_addr,socklen_t *clilen, st_tls* p_tls);
 TTcpConnectedPort *OpenTcpConnection(const char *remotehostname, const char * remoteportno);
 void CloseTcpConnectedPort(TTcpConnectedPort **TcpConnectedPort);
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length);
