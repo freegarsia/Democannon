@@ -18,6 +18,7 @@
 #define IDD_LOAD_KEYS                   132
 #define IDC_LOAD_KEY                    1000
 #define IDC_KEY_LOC                     1001
+#define IDC_KEY_LOC2                    1002
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

@@ -13,6 +13,8 @@
 #include "TcpSendRecv.h"
 #include "DisplayImage.h"
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 
 enum InputMode { MsgHeader, Msg };
@@ -20,6 +22,9 @@ static  std::vector<uchar> sendbuff;//buffer for coding
 static HANDLE hClientEvent = INVALID_HANDLE_VALUE;
 static HANDLE hEndClientEvent = INVALID_HANDLE_VALUE;
 static SOCKET Client = INVALID_SOCKET;
+static SSL* sslClient = NULL;
+static SSL_CTX* sslCtx = NULL;
+
 static cv::Mat ImageIn;
 static DWORD ThreadClientID;
 static HANDLE hThreadClient = INVALID_HANDLE_VALUE;
@@ -145,6 +150,30 @@ bool SendStateChangeRequestToSever(SystemState_t State)
     return false;
 }
 
+void initialize_openssl() {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+}
+
+void cleanup_openssl() {
+    EVP_cleanup();
+}
+
+SSL_CTX* create_context() {
+    const SSL_METHOD* method;
+    SSL_CTX* ctx;
+
+    method = SSLv23_client_method();
+    ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Unable to create SSL context");
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
 bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
 {
     int iResult;
@@ -172,7 +201,6 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     }
 
     if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
-
     {
         freeaddrinfo(result);
         std::cout << "video client socket() failed with error "<< WSAGetLastError() << std::endl;
@@ -191,6 +219,7 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
             std::cout << "closesocket function failed with error :"<< WSAGetLastError() << std::endl;
         return false;
     }
+
     int yes = 1;
     iResult = setsockopt(Client,
         IPPROTO_TCP,
@@ -202,6 +231,15 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
         printf("TCP NODELAY Failed\n");
     }
     else  printf("TCP NODELAY SET\n");
+
+    sslCtx = create_context();
+    sslClient = SSL_new(sslCtx);
+    SSL_set_fd(sslClient, Client);
+
+
+
+
+
     return true;
 
 }
@@ -270,6 +308,7 @@ void ProcessMessage(char* MsgBuffer)
 
 
 }
+
 static DWORD WINAPI ThreadClient(LPVOID ivalue)
 {    
     HANDLE ghEvents[2];
@@ -293,13 +332,111 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
       return 1;
     }
  
-     hClientEvent = WSACreateEvent();
+    hClientEvent = WSACreateEvent();
+
+    // Perform the SSL/TLS handshake
+    if (SSL_connect(sslClient) <= 0) {
+        ERR_print_errors_fp(stderr);
+        SSL_free(sslClient);
+        SSL_CTX_free(sslCtx);
+        closesocket(Client);
+        WSACloseEvent(hClientEvent);
+        WSACleanup();
+        return 1;
+    }
+
+    // Main loop to handle events
+    while (true) {
+        DWORD eventResult = WSAWaitForMultipleEvents(1, &hClientEvent, FALSE, WSA_INFINITE, FALSE);
+        if (eventResult == WSA_WAIT_FAILED) {
+            perror("WSAWaitForMultipleEvents failed");
+            break;
+        }
+
+        WSANETWORKEVENTS networkEvents;
+        if (WSAEnumNetworkEvents(Client, hClientEvent, &networkEvents) == SOCKET_ERROR) {
+            perror("WSAEnumNetworkEvents failed");
+            break;
+        }
+
+        if (networkEvents.lNetworkEvents & FD_READ) {
+            char buf[1024];
+            int bytes = SSL_read(sslClient, buf, sizeof(buf));
+            if (bytes > 0) {
+                buf[bytes] = '\0';
+                printf("Received: %s\n", buf);
+            }
+            else if (bytes == 0) {
+                printf("Connection closed by peer\n");
+                break;
+            }
+            else {
+                int err = SSL_get_error(sslClient, bytes);
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                    // SSL_read needs to be called again
+                    continue;
+                }
+                else {
+                    ERR_print_errors_fp(stderr);
+                    break;
+                }
+            }
+        }
+
+        if (networkEvents.lNetworkEvents & FD_WRITE) {
+            // Handle writable socket (if needed)
+        }
+
+        if (networkEvents.lNetworkEvents & FD_CLOSE) {
+            printf("Connection closed\n");
+            break;
+        }
+
+        // Reset the event
+        WSAResetEvent(hClientEvent);
+    }
+
+
+    if (InputBuffer)
+    {
+        std::free(InputBuffer);
+        InputBuffer = nullptr;
+    }
+    ClientCleanup();
+    std::cout << "Client Exiting" << std::endl;
+    return 0;
+}
+
+static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
+{
+    HANDLE ghEvents[2];
+    int NumEvents;
+    int iResult;
+    DWORD dwEvent;
+    InputMode Mode = MsgHeader;
+    unsigned int InputBytesNeeded = sizeof(TMesssageHeader);
+    TMesssageHeader MsgHdr;
+    char* InputBuffer = NULL;
+    char* InputBufferWithOffset = NULL;
+    unsigned int CurrentInputBufferSize = 1024 * 10;
+
+    InputBuffer = (char*)std::realloc(InputBuffer, CurrentInputBufferSize);
+    InputBufferWithOffset = InputBuffer;
+
+    if (InputBuffer == NULL)
+    {
+        std::cout << "InputBuffer Realloc failed" << std::endl;
+        ExitProcess(0);
+        return 1;
+    }
+
+    hClientEvent = WSACreateEvent();
     hEndClientEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (WSAEventSelect(Client, hClientEvent, FD_READ | FD_CLOSE) == SOCKET_ERROR)
 
     {
-        std::cout << "WSAEventSelect() failed with error "<< WSAGetLastError() << std::endl;
+        std::cout << "WSAEventSelect() failed with error " << WSAGetLastError() << std::endl;
         iResult = closesocket(Client);
         Client = INVALID_SOCKET;
         if (iResult == SOCKET_ERROR)
@@ -311,120 +448,120 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
     NumEvents = 2;
 
     while (1) {
-     dwEvent = WaitForMultipleObjects(
-         NumEvents,        // number of objects in array
-         ghEvents,       // array of objects
-         FALSE,           // wait for any object
-         INFINITE);  // INFINITE) wait
+        dwEvent = WaitForMultipleObjects(
+            NumEvents,        // number of objects in array
+            ghEvents,       // array of objects
+            FALSE,           // wait for any object
+            INFINITE);  // INFINITE) wait
 
-     if (dwEvent == WAIT_OBJECT_0) break;
-     else if (dwEvent == WAIT_OBJECT_0 + 1)
-     {
-         WSANETWORKEVENTS NetworkEvents;
-         if (SOCKET_ERROR == WSAEnumNetworkEvents(Client, hClientEvent, &NetworkEvents))
-         {
-             std::cout << "WSAEnumNetworkEvent: "<< WSAGetLastError() << "dwEvent "<< dwEvent << " lNetworkEvent "<<std::hex<< NetworkEvents.lNetworkEvents<< std::endl;
-             NetworkEvents.lNetworkEvents = 0;
-         }
-         else
-         {
-             if (NetworkEvents.lNetworkEvents & FD_READ)
-             {
-                 if (NetworkEvents.iErrorCode[FD_READ_BIT] != 0)
-                 {
-                     std::cout << "FD_READ failed with error " << NetworkEvents.iErrorCode[FD_READ_BIT]<< std::endl;
-                 }
-                 else
-                 {
-                   int iResult;
-                   iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
-                   if (iResult != SOCKET_ERROR)
-                   {
-                       if (iResult == 0)
-                       {
-                           Mode = MsgHeader;
-                           InputBytesNeeded = sizeof(TMesssageHeader);
-                           InputBufferWithOffset = InputBuffer;
-                           PostMessage(hWndMain, WM_CLIENT_LOST, 0, 0);
-                           std::cout << "Connection closed on Recv" << std::endl;
-                           break;
-                       }
-                       else
-                       {
-                           InputBytesNeeded -= iResult;
-                           InputBufferWithOffset += iResult;
-                           if (InputBytesNeeded == 0)
-                           {
-                               if (Mode == MsgHeader)
-                               {
-                                  
-                                   InputBufferWithOffset = InputBuffer+sizeof(TMesssageHeader);
-                                   memcpy(&MsgHdr, InputBuffer, sizeof(TMesssageHeader));
-                                   MsgHdr.Len = ntohl(MsgHdr.Len);
-                                   MsgHdr.Type = ntohl(MsgHdr.Type);
-                                   InputBytesNeeded = MsgHdr.Len;
-                                   Mode = Msg;
-                                   if ((InputBytesNeeded+sizeof(TMesssageHeader)) > CurrentInputBufferSize)
-                                   {   
-                                       CurrentInputBufferSize = InputBytesNeeded+sizeof(TMesssageHeader) + (10 * 1024);
-                                       InputBuffer = (char*)std::realloc(InputBuffer, CurrentInputBufferSize);
-                                       if (InputBuffer == NULL)
-                                       {
-                                           std::cout << "std::realloc failed " << std::endl;
-                                           ExitProcess(0);
-                                       }
-                                       InputBufferWithOffset = InputBuffer + sizeof(TMesssageHeader);
-                                   }
-                                   
-                               }
-                               else if (Mode == Msg)
-                               {
-                                   ProcessMessage(InputBuffer);
-                                   // Setup for next message
-                                   Mode = MsgHeader;
-                                   InputBytesNeeded = sizeof(TMesssageHeader);
-                                   InputBufferWithOffset = InputBuffer;
-                               }
-                           }
+        if (dwEvent == WAIT_OBJECT_0) break;
+        else if (dwEvent == WAIT_OBJECT_0 + 1)
+        {
+            WSANETWORKEVENTS NetworkEvents;
+            if (SOCKET_ERROR == WSAEnumNetworkEvents(Client, hClientEvent, &NetworkEvents))
+            {
+                std::cout << "WSAEnumNetworkEvent: " << WSAGetLastError() << "dwEvent " << dwEvent << " lNetworkEvent " << std::hex << NetworkEvents.lNetworkEvents << std::endl;
+                NetworkEvents.lNetworkEvents = 0;
+            }
+            else
+            {
+                if (NetworkEvents.lNetworkEvents & FD_READ)
+                {
+                    if (NetworkEvents.iErrorCode[FD_READ_BIT] != 0)
+                    {
+                        std::cout << "FD_READ failed with error " << NetworkEvents.iErrorCode[FD_READ_BIT] << std::endl;
+                    }
+                    else
+                    {
+                        int iResult;
+                        iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+                        if (iResult != SOCKET_ERROR)
+                        {
+                            if (iResult == 0)
+                            {
+                                Mode = MsgHeader;
+                                InputBytesNeeded = sizeof(TMesssageHeader);
+                                InputBufferWithOffset = InputBuffer;
+                                PostMessage(hWndMain, WM_CLIENT_LOST, 0, 0);
+                                std::cout << "Connection closed on Recv" << std::endl;
+                                break;
+                            }
+                            else
+                            {
+                                InputBytesNeeded -= iResult;
+                                InputBufferWithOffset += iResult;
+                                if (InputBytesNeeded == 0)
+                                {
+                                    if (Mode == MsgHeader)
+                                    {
 
-                       }
-                   }
-                  else std::cout << "ReadDataTcpNoBlock buff failed " << WSAGetLastError() << std::endl;
+                                        InputBufferWithOffset = InputBuffer + sizeof(TMesssageHeader);
+                                        memcpy(&MsgHdr, InputBuffer, sizeof(TMesssageHeader));
+                                        MsgHdr.Len = ntohl(MsgHdr.Len);
+                                        MsgHdr.Type = ntohl(MsgHdr.Type);
+                                        InputBytesNeeded = MsgHdr.Len;
+                                        Mode = Msg;
+                                        if ((InputBytesNeeded + sizeof(TMesssageHeader)) > CurrentInputBufferSize)
+                                        {
+                                            CurrentInputBufferSize = InputBytesNeeded + sizeof(TMesssageHeader) + (10 * 1024);
+                                            InputBuffer = (char*)std::realloc(InputBuffer, CurrentInputBufferSize);
+                                            if (InputBuffer == NULL)
+                                            {
+                                                std::cout << "std::realloc failed " << std::endl;
+                                                ExitProcess(0);
+                                            }
+                                            InputBufferWithOffset = InputBuffer + sizeof(TMesssageHeader);
+                                        }
 
-                 }
+                                    }
+                                    else if (Mode == Msg)
+                                    {
+                                        ProcessMessage(InputBuffer);
+                                        // Setup for next message
+                                        Mode = MsgHeader;
+                                        InputBytesNeeded = sizeof(TMesssageHeader);
+                                        InputBufferWithOffset = InputBuffer;
+                                    }
+                                }
 
-             }
-             if (NetworkEvents.lNetworkEvents & FD_WRITE)
-             {
-                 if (NetworkEvents.iErrorCode[FD_WRITE_BIT] != 0)
-                 {
-                     std::cout << "FD_WRITE failed with error "<< NetworkEvents.iErrorCode[FD_WRITE_BIT] << std::endl;
-                 }
-                 else
-                 {
-                     std::cout << "FD_WRITE" << std::endl;
-                 }
-             }
-         
-             if (NetworkEvents.lNetworkEvents & FD_CLOSE)
-             {
-                 if (NetworkEvents.iErrorCode[FD_CLOSE_BIT] != 0)
+                            }
+                        }
+                        else std::cout << "ReadDataTcpNoBlock buff failed " << WSAGetLastError() << std::endl;
 
-                 {
-                     std::cout << "FD_CLOSE failed with error "<< NetworkEvents.iErrorCode[FD_CLOSE_BIT] << std::endl;
-                 }
-                 else
-                 {
-                     std::cout << "FD_CLOSE" << std::endl;
-                     PostMessage(hWndMain, WM_CLIENT_LOST, 0, 0);
-                     break;
-                  }
+                    }
 
-             }
-          }
+                }
+                if (NetworkEvents.lNetworkEvents & FD_WRITE)
+                {
+                    if (NetworkEvents.iErrorCode[FD_WRITE_BIT] != 0)
+                    {
+                        std::cout << "FD_WRITE failed with error " << NetworkEvents.iErrorCode[FD_WRITE_BIT] << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "FD_WRITE" << std::endl;
+                    }
+                }
 
-       }
-     }
+                if (NetworkEvents.lNetworkEvents & FD_CLOSE)
+                {
+                    if (NetworkEvents.iErrorCode[FD_CLOSE_BIT] != 0)
+
+                    {
+                        std::cout << "FD_CLOSE failed with error " << NetworkEvents.iErrorCode[FD_CLOSE_BIT] << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "FD_CLOSE" << std::endl;
+                        PostMessage(hWndMain, WM_CLIENT_LOST, 0, 0);
+                        break;
+                    }
+
+                }
+            }
+
+        }
+    }
     if (InputBuffer)
     {
         std::free(InputBuffer);

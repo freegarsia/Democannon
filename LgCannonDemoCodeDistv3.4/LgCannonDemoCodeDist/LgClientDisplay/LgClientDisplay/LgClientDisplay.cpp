@@ -15,13 +15,16 @@
 #include "DisplayImage.h"
 #include "Message.h"
 #include "Client.h"
-#include <commdlg.h>
+#include "enc_dec.h"
+#include "cannonlogger.h"
 
+#include <commdlg.h>
 #include <cryptopp/aes.h>
 #include <cryptopp/modes.h>
 #include <cryptopp/filters.h>
 #include <cryptopp/osrng.h>
 #include <cryptopp/base64.h>
+
 
 #pragma comment(lib,"comctl32.lib")
 #ifdef _DEBUG
@@ -62,6 +65,8 @@ HWND hWndMain;
 GUID InstanceGuid;
 
 SystemState_t SystemState = SAFE;
+std::shared_ptr<spdlog::logger> Logger;
+
 static HINSTANCE hInst;                                // current instance
 static WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 static WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
@@ -91,7 +96,6 @@ static int OnStopServer(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 static void SetStdOutToNewConsole(void);
 static void DisplayMessageOkBox(const char* Msg);
 static bool OnlyOneInstance(void);
-
 
 INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -149,6 +153,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     WSADATA wsaData;
     HRESULT hr;
 
+
+    // AES 키와 IV 설정 (암호화와 복호화에 동일하게 사용해야 함)
+    byte key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
+    byte iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
+
+    // Logging config
+    try {
+        // Create a file logger
+        Logger = spdlog::basic_logger_mt("audit_log", "./cannon.log");
+    }
+    catch (const spdlog::spdlog_ex& ex) {
+        DisplayMessageOkBox("Log initialization failed");
+        Logger = NULL;
+    }
+
     SetStdOutToNewConsole();
 
     int res = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -175,7 +195,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         using namespace CryptoPP;
 
         // AES 키와 IV 설정 (암호화와 복호화에 동일하게 사용해야 함)
-        byte key[AES::DEFAULT_KEYLENGTH] = { /* 16 바이트 키 값 */ };
+        byte key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
         byte iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
 
         // 원문 설정
@@ -207,6 +228,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
         catch (const CryptoPP::Exception& e)
         {
+            cannonLogger_error("Password is not correct");
+
             std::cerr << "Crypto++ exception: " << e.what() << std::endl;
             return 1;
         }
@@ -218,8 +241,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         std::string decryptedtext;
         try
         {
+            byte dec_key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x00 };
             CBC_Mode<AES>::Decryption decryption;
-            decryption.SetKeyWithIV(key, AES::DEFAULT_KEYLENGTH, iv);
+            decryption.SetKeyWithIV(dec_key, AES::DEFAULT_KEYLENGTH, iv);
 
             // Base64 디코딩 (옵션)
             std::string decoded;
@@ -238,7 +263,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
         catch (const CryptoPP::Exception& e)
         {
-            std::cerr << "Crypto++ exception: " << e.what() << std::endl;
+            DisplayMessageOkBox("Password is not correct!");
             return 1;
         }
 
@@ -246,7 +271,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         std::cout << "Decrypted text: " << decryptedtext << std::endl;
     }
     else if (ret == IDCANCEL) {
-        std::cout << "Public key is not selected" << std::endl;
+        cannonLogger_info("KEY location setting is terminated");
         return 1;
     }
 
