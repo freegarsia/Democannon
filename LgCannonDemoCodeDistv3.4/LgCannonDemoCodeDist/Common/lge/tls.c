@@ -5,9 +5,6 @@
 #include <arpa/inet.h>
 #include <tls.h>
 
-#define KEY_ENCRYPTED
-#define TEST
-
 // Buffer size for reading file
 #define BUFFER_SIZE 4096
 
@@ -179,7 +176,7 @@ unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *passwo
     int inlen, outlen;
 
     while ((inlen = fread(inbuf, 1, BUFFER_SIZE, ifp)) > 0) {
-        outbuf = realloc(outbuf, outbuf_len + inlen + EVP_MAX_BLOCK_LENGTH);
+        outbuf = (unsigned char*)realloc(outbuf, outbuf_len + inlen + EVP_MAX_BLOCK_LENGTH);
         if (!outbuf) {
             perror("Memory allocation failed");
             return NULL;
@@ -205,9 +202,12 @@ unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *passwo
     return outbuf;
 }
 
-#define PORT 4443
 
+//#define TEST
 #if defined(TEST)
+
+#define KEY_ENCRYPTED
+#define PORT 4443
 
 int main(int argc, char **argv) {
 

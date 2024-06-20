@@ -23,6 +23,7 @@
 #include "lgpio.h"
 #include "CvImageMatch.h"
 #include "ssd1306.h"
+#include <tls.h>
 
 //#define USE_TFLITE      1 
 #define USE_IMAGE_MATCH 1
@@ -655,6 +656,34 @@ int main(int argc, const char** argv)
   struct sockaddr_in               cli_addr;
   socklen_t                        clilen;
   chrono::steady_clock::time_point Tbegin, Tend;
+
+  if (argc != 2) {
+      fprintf(stderr, "Usage: %s <password>\n", argv[0]);
+      exit(EXIT_FAILURE);
+  }
+
+  const char *password = argv[1];
+  unsigned char* cert = NULL;
+  unsigned char* key = NULL;
+  int cert_len = 0;
+  int key_len = 0;
+
+  tls_init_openssl();    
+  cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
+  if (cert == NULL) {
+      fprintf(stderr, "Decryption failed.1\n");
+      exit(EXIT_FAILURE);    
+  }
+  cert[cert_len] = 0;
+  
+  key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
+  if (cert == NULL) {
+      fprintf(stderr, "Decryption failed.2\n");
+      exit(EXIT_FAILURE);   
+  }    
+  key[key_len] = 0;
+  
+
  
   ReadOffsets();
 
