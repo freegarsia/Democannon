@@ -5,6 +5,40 @@
 #include <arpa/inet.h>
 #include <tls.h>
 
+/* NOTE =========================================================================================================
+Steps to Ensure Proper Certificate Verification
+1) Create a CA Certificate and Key:
+openssl req -x509 -newkey rsa:4096 -keyout ca-key.pem -out ca-cert.pem -days 365 -nodes
+
+2) Generate the Server’s Private Key and CSR:
+openssl req -newkey rsa:4096 -keyout server-key.pem -out server-req.pem -nodes
+
+3) Sign the Server’s CSR with the CA Certificate:
+openssl x509 -req -in server-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -days 365
+
+4) Generate the Client’s Private Key and CSR:
+openssl req -newkey rsa:4096 -keyout client-key.pem -out client-req.pem -nodes
+
+5) Sign the Client’s CSR with the CA Certificate:
+openssl x509 -req -in client-req.pem -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial -out client-cert.pem -days 365
+
+6) Verify the Certificates:
+Ensure that the CA certificate can validate both the server and client certificates:
+openssl verify -CAfile ca-cert.pem server-cert.pem
+openssl verify -CAfile ca-cert.pem client-cert.pem
+
+7)Run OpenSSL s_server:
+openssl s_server -cert server-cert.pem -key server-key.pem -CAfile ca-cert.pem -Verify 1 -accept 4443
+
+8) Run OpenSSL s_client:
+openssl s_client -cert client-cert.pem -key client-key.pem -CAfile ca-cert.pem -connect 127.0.0.1:4443
+
+9) encryption of AES-256-CBC
+openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222    
+openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222 
+==============================================================================================================*/
+
+
 // Buffer size for reading file
 #define BUFFER_SIZE 4096
 
