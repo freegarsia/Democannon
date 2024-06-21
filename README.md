@@ -23,9 +23,16 @@
   2) vcpkg install cryptopp
   3) vcpkg integrate install
 
+#### II. How to build
 
+#### III. How to run
 
-#### II. Local Testing
+#### IV. Local Testing
 
+## Design documentation
+It will be attached in repo.
+
+## Requirements documentation
+It will be attached in repo.
 
 
