@@ -23,7 +23,11 @@
 #include "lgpio.h"
 #include "CvImageMatch.h"
 #include "ssd1306.h"
+
+#if defined(TLS_ENABLE)
 #include <tls.h>
+st_tls tls = {.ctx = NULL, .ssl = NULL};
+#endif /*TLS_ENABLE*/
 
 //#define USE_TFLITE      1 
 #define USE_IMAGE_MATCH 1
@@ -118,7 +122,7 @@ static void   Control_C_Handler(int s);
 static void   HandleInputChar(Mat &image);
 static void * NetworkInputThread(void *data);
 static void * EngagementThread(void *data); 
-static int    PrintfSend(const char *fmt, ...); 
+static int PrintfSend(const char *fmt, ...);
 static bool   GetFrame( Mat &frame);
 static void   CreateNoDataAvalable(void);
 static int    SendSystemState(SystemState_t State);
@@ -657,6 +661,7 @@ int main(int argc, const char** argv)
   socklen_t                        clilen;
   chrono::steady_clock::time_point Tbegin, Tend;
 
+#if defined(TLS_ENABLE)
     if (argc != 2) {
       fprintf(stderr, "Usage: %s <password>\n", argv[0]);
       exit(EXIT_FAILURE);
@@ -683,11 +688,9 @@ int main(int argc, const char** argv)
     }    
     key[key_len] = 0;
 
-    st_tls tls;
-    tls_init_openssl();
     tls_create_context(&tls);  
     tls_configure_context(&tls, cert, key, "ca-cert.pem");
-
+#endif /*TLS_ENABLE*/
  
   ReadOffsets();
 
@@ -772,7 +775,11 @@ int main(int argc, const char** argv)
   
   CreateNoDataAvalable();
 
+#if defined(TLS_ENABLE)
+  if (pthread_create(&NetworkThreadID, NULL,NetworkInputThread, &tls)!=0)
+#else /*TLS_ENABLE*/
   if (pthread_create(&NetworkThreadID, NULL,NetworkInputThread, NULL)!=0)
+#endif /*TLS_ENABLE*/
    {
      printf("Failed to Create Network Input Thread\n");
      exit(0);
@@ -846,8 +853,12 @@ int main(int argc, const char** argv)
       DrawCrosshair(ResizedFrame,Point((int)xCorrect,(int)yCorrect),Scalar(0, 0, 255)); //BGR
      }
 
-    
+#if defined(TLS_ENABLE)   
+    if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls)<0))  break;
+#else /*TLS_ENABLE*/  
     if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame)<0))  break;
+#endif /*TLS_ENABLE*/  
+
    
     Tend = chrono::steady_clock::now();
     avfps = chrono::duration_cast <chrono::milliseconds> (Tend - Tbegin).count();
@@ -857,6 +868,9 @@ int main(int argc, const char** argv)
 
   printf("Main Thread Exiting\n");
   CleanUp();
+#if defined(TLS_ENABLE)  
+  tls_cleanup_openssl(&tls);
+#endif /*TLS_ENABLE*/  
   return 0;
 }
 //------------------------------------------------------------------------------------------------
@@ -926,12 +940,20 @@ static int PrintfSend(const char *fmt, ...)
        BytesWritten++;
        MsgHdr.Len=htonl(BytesWritten);
        MsgHdr.Type=htonl(MT_TEXT);
-       if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) 
+#if defined(TLS_ENABLE)       
+       if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader), &tls)!=sizeof(TMesssageHeader)) 
+#else /*TLS_ENABLE*/
+        if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) 
+#endif /*TLS_ENABLE*/
            {
             pthread_mutex_unlock(&TCP_Mutex);
             return (-1);
            }
+#if defined(TLS_ENABLE)       
+        retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)Buffer,BytesWritten, &tls);
+#else /*TLS_ENABLE*/
        retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)Buffer,BytesWritten);
+#endif /*TLS_ENABLE*/       
        pthread_mutex_unlock(&TCP_Mutex);
        return(retval);
       }
@@ -956,7 +978,11 @@ static int SendSystemState(SystemState_t State)
  StateMsg.Hdr.Len=htonl(sizeof(StateMsg.State));
  StateMsg.Hdr.Type=htonl(MT_STATE);
  OLED_UpdateStatus();
- retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState));
+#if defined(TLS_ENABLE)   
+ retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState), &tls);
+#else /*TLS_ENABLE*/
+    retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState));
+#endif /*TLS_ENABLE*/
  pthread_mutex_unlock(&TCP_Mutex);
  return(retval);
 } 
@@ -1254,10 +1280,17 @@ static void *NetworkInputThread(void *data)
  int fd=TcpConnectedPort->ConnectedFd,retval;
  
  SendSystemState(SystemState);
-
+ #if defined(TLS_ENABLE) 
+    st_tls* p_tls = (st_tls*)data;
+#endif /*TLS_ENABLE*/     
+    
  while (1)
  {
+#if defined(TLS_ENABLE) 
+    if ((retval=SSL_read(p_tls->ssl, &Buffer, sizeof(TMesssageHeader))) != sizeof(TMesssageHeader)) 
+#else /*TLS_ENABLE*/
    if ((retval=recv(fd, &Buffer, sizeof(TMesssageHeader),0)) != sizeof(TMesssageHeader)) 
+#endif /*TLS_ENABLE*/    
      {
       if (retval==0) printf("Client Disconnnected\n");
       else printf("Connecton Lost %s\n", strerror(errno));
@@ -1272,7 +1305,12 @@ static void *NetworkInputThread(void *data)
       printf("oversized message error %d\n",MsgHdr->Len);
       break;
      }
-   if ((retval=recv(fd, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len,0)) !=  MsgHdr->Len) 
+
+#if defined(TLS_ENABLE)
+       if ((retval=SSL_read(p_tls->ssl, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len)) !=  MsgHdr->Len) 
+#else /*TLS_ENABLE*/
+         if ((retval=recv(fd, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len,0)) !=  MsgHdr->Len) 
+#endif /*TLS_ENABLE*/    
      {
       if (retval==0) printf("Client Disconnnected\n");
       else printf("Connecton Lost %s\n", strerror(errno));

@@ -264,13 +264,21 @@ void CloseTcpConnectedPort(TTcpConnectedPort **TcpConnectedPort)
 //-----------------------------------------------------------------
 // ReadDataTcp - Reads the specified amount TCP data 
 //-----------------------------------------------------------------
+#if defined(TLS_ENABLE)
+ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length, const st_tls* p_tls)
+#else /*defined(TLS_ENABLE)*/
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length)
+#endif 
 {
  ssize_t bytes;
  
  for (size_t i = 0; i < length; i += bytes)
     {
+#if defined(TLS_ENABLE)
+    if ((bytes = SSL_read(p_tls->ssl, (char *)(data+i), length  - i)) == -1) 
+#else
       if ((bytes = recv(TcpConnectedPort->ConnectedFd, (char *)(data+i), length  - i,0)) == -1) 
+#endif      
       {
        return (-1);
       }
@@ -283,15 +291,25 @@ ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, siz
 //-----------------------------------------------------------------
 // WriteDataTcp - Writes the specified amount TCP data 
 //-----------------------------------------------------------------
+#if defined(TLS_ENABLE) 
+ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length, const st_tls* p_this)
+#else /*TLS_ENABLE*/
 ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length)
+#endif /*TLS_ENABLE*/
 {
   ssize_t total_bytes_written = 0;
   ssize_t bytes_written;
   while (total_bytes_written != length)
     {
-     bytes_written = send(TcpConnectedPort->ConnectedFd,
+#if defined(TLS_ENABLE)    
+     bytes_written = SSL_write(p_this->ssl,
 	                               (char *)(data+total_bytes_written),
-                                  length - total_bytes_written,0);
+                                  length - total_bytes_written);
+#else /*TLS_ENABLE*/
+    bytes_written = send(TcpConnectedPort->ConnectedFd,
+                              (char *)(data+total_bytes_written),
+                             length - total_bytes_written,0);
+#endif /*TLS_ENABLE*/
      if (bytes_written == -1)
        {
        return(-1);

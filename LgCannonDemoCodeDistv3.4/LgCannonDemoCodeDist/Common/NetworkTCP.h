@@ -29,7 +29,10 @@ typedef SSIZE_T ssize_t;
 #define  SOCKET_FD_TYPE int
 #define  BAD_SOCKET_FD  -1
 #endif
+
+#if defined(TLS_ENABLE)
 #include <tls.h>
+#endif /*TLS_ENABLE*/
 
 //------------------------------------------------------------------------------------------------
 // Types
@@ -54,8 +57,17 @@ TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
                        struct sockaddr_in *cli_addr,socklen_t *clilen, st_tls* p_tls);
 TTcpConnectedPort *OpenTcpConnection(const char *remotehostname, const char * remoteportno);
 void CloseTcpConnectedPort(TTcpConnectedPort **TcpConnectedPort);
+#if defined(TLS_ENABLE)
+ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length, const st_tls* p_tls);
+#else /*defined(TLS_ENABLE)*/
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length);
+#endif 
+#if defined(TLS_ENABLE) 
+ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length, const st_tls* p_this);
+#else /*TLS_ENABLE*/
 ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length);
+#endif /*TLS_ENABLE*/
+
 #endif
 //------------------------------------------------------------------------------------------------
 //END of Include

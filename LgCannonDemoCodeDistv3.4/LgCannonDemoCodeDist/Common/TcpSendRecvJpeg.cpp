@@ -18,15 +18,24 @@ static  std::vector<uchar> sendbuff;//buffer for coding
 // jpeg image in side a TCP Stream on the specified TCP local port
 // and Destination. return bytes sent on success and -1 on failure
 //-----------------------------------------------------------------
+#if defined(TLS_ENABLE)
+int TcpSendImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat Image, const st_tls* p_tls)
+#else /*TLS_ENABLE*/
 int TcpSendImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat Image)
+#endif /*TLS_ENABLE*/
 {
     TMesssageHeader MsgHdr;
     MsgHdr.Type=htonl(MT_IMAGE);
     cv::imencode(".jpg", Image, sendbuff, param);
     MsgHdr.Len=htonl(sendbuff.size()); // convert image size to network format
-    if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader))!=sizeof(TMesssageHeader))
-    return(-1);
-    return(WriteDataTcp(TcpConnectedPort,sendbuff.data(), sendbuff.size()));
+#if defined(TLS_ENABLE)    
+    if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader), p_tls)!=sizeof(TMesssageHeader)) return(-1);
+    return(WriteDataTcp(TcpConnectedPort,sendbuff.data(), sendbuff.size(), p_tls));    
+#else /*TLS_ENABLE*/
+    if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) return(-1);
+    return(WriteDataTcp(TcpConnectedPort,sendbuff.data(), sendbuff.size(), p_tls));    
+#endif /*TLS_ENABLE*/        
+
 }
 
 //-----------------------------------------------------------------
@@ -37,12 +46,20 @@ int TcpSendImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat Image)
 // jpeg image in side a TCP Stream on the specified TCP local port
 // returns true on success and false on failure
 //-----------------------------------------------------------------
+#if defined(TLS_ENABLE)
+bool TcpRecvImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat *Image, const st_tls* p_tls)
+#else /*TLS_ENABLE*/
 bool TcpRecvImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat *Image)
+#endif /*TLS_ENABLE*/
+
 {
   TMesssageHeader MsgHdr;
   unsigned char *buff;	/* receive buffer */   
-  
-  if (ReadDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) return(false);
+#if defined(TLS_ENABLE)   
+  if (ReadDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader), p_tls)!=sizeof(TMesssageHeader)) return(false);
+#else /*TLS_ENABLE*/
+    if (ReadDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) return(false);
+#endif /*TLS_ENABLE*/
   
   MsgHdr.Len=ntohl(MsgHdr.Len); // convert image size to host format
   MsgHdr.Type=htonl(MsgHdr.Type);
@@ -56,7 +73,11 @@ bool TcpRecvImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat *Image)
   buff = new (std::nothrow) unsigned char [MsgHdr.Len];
   if (buff==NULL) return false;
 
-  if((ReadDataTcp(TcpConnectedPort,buff,MsgHdr.Len))==MsgHdr.Len)
+#if defined(TLS_ENABLE)  
+  if((ReadDataTcp(TcpConnectedPort,buff,MsgHdr.Len, p_tls))==MsgHdr.Len)
+#else /*TLS_ENABLE*/
+    if((ReadDataTcp(TcpConnectedPort,buff,MsgHdr.Len))==MsgHdr.Len)
+#endif /*TLS_ENABLE*/
    {
      cv::imdecode(cv::Mat(MsgHdr.Len,1,CV_8UC1,buff), cv::IMREAD_COLOR, Image );
      delete [] buff;

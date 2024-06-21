@@ -61,8 +61,15 @@ void tls_new_set_fd(st_tls* p_this, const int sock)
     SSL_set_fd(p_this->ssl, sock);
 }
 
-void tls_cleanup_openssl() {
-    EVP_cleanup();
+void tls_cleanup_openssl(st_tls* p_this) {
+    if (p_this != NULL) {
+        SSL_shutdown(p_this->ssl);
+        SSL_free(p_this->ssl);
+        SSL_CTX_free(p_this->ctx);
+        EVP_cleanup();    
+        p_this->ssl = 0;
+        p_this->ctx = 0;
+    }
 }
 
 SSL_CTX* tls_create_context(st_tls* p_this) {
@@ -320,12 +327,8 @@ int main(int argc, char **argv) {
         SSL_read(ssl, buf, sizeof(buf));
         printf("Received: %s\n", buf);
     }
-
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
     close(sock);
-    SSL_CTX_free(ctx);
-    tls_cleanup_openssl();
+    tls_cleanup_openssl(&tls);
 
 #if defined(KEY_ENCRYPTED)        
     if (cert != NULL)
