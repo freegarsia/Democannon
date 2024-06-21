@@ -17,6 +17,7 @@
 #include "Client.h"
 #include "enc_dec.h"
 #include "cannonlogger.h"
+#include "tls.h"
 
 #include <commdlg.h>
 #include <cryptopp/aes.h>
@@ -25,6 +26,8 @@
 #include <cryptopp/osrng.h>
 #include <cryptopp/base64.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 #pragma comment(lib,"comctl32.lib")
 #ifdef _DEBUG
@@ -91,11 +94,14 @@ static LRESULT OnCreate(HWND, UINT, WPARAM, LPARAM);
 static LRESULT OnSize(HWND, UINT, WPARAM, LPARAM);
 static int OnConnect(HWND, UINT, WPARAM, LPARAM);
 static int OnDisconnect(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+static int OnChangePassword(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 static int OnStartServer(HWND, UINT, WPARAM, LPARAM);
 static int OnStopServer(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 static void SetStdOutToNewConsole(void);
 static void DisplayMessageOkBox(const char* Msg);
 static bool OnlyOneInstance(void);
+
+
 
 INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -231,7 +237,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             cannonLogger_error("Password is not correct");
 
             std::cerr << "Crypto++ exception: " << e.what() << std::endl;
-            return 1;
+            //return 1;
         }
 
         // 암호화된 텍스트 출력
@@ -264,7 +270,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         catch (const CryptoPP::Exception& e)
         {
             DisplayMessageOkBox("Password is not correct!");
-            return 1;
+            //return 1;
         }
 
         // 결과 출력
@@ -594,6 +600,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
                 DestroyWindow(hWnd);
                 break;
             case IDM_CONNECT:
+                cannonLogger_info("Connection executed");
                 if (OnConnect(hWnd, message, wParam, lParam))
                 {
                     SendMessage(hWndMainToolbar, TB_SETSTATE, IDM_CONNECT,
@@ -603,6 +610,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
                 }
                 break;
             case IDM_DISCONNECT:
+                cannonLogger_info("DisConnection executed");
                 SendMessage(hWndMainToolbar, TB_SETSTATE, IDM_CONNECT,
                     (LPARAM)MAKELONG(TBSTATE_ENABLED, 0));
                 SendMessage(hWndMainToolbar, TB_SETSTATE, IDM_DISCONNECT,
@@ -610,7 +618,10 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
                 OnDisconnect(hWnd, message, wParam, lParam);
                 break;
             case IDM_CHANGE_PASSWORD:
+                cannonLogger_info("Password changement executed");
                 DisplayMessageOkBox("Let's change password!!");
+                
+                OnChangePassword(hWnd, message, wParam, lParam);                
                 break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
@@ -987,25 +998,37 @@ static int OnConnect(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
  
     if (!IsClientConnected())
     {
-            if (ConnectToSever(RemoteAddress, VIDEO_PORT))
-            {
-                std::cout << "Connected to Server" << std::endl;
-                StartClient();
-                std::cout << "Client Started.." << std::endl;
-                EnableWindow(GetDlgItem(hWnd, IDC_BUTTON_PREARM_SAFE), true);
-                EnableWindow(GetDlgItem(hWnd, IDC_EDIT_PREARM_CODE), true);
-                EnableWindow(GetDlgItem(hWnd, IDC_LABEL_PREARM_CODE), true);
-                return 1;
-            }
-            else
-            {
-                DisplayMessageOkBox("Connection Failed!");
-                return 0;
-            }
+
+        if (ConnectToSever(RemoteAddress, VIDEO_PORT))
+        {
+            std::cout << "Connected to Server" << std::endl;
+            StartClient();
+            std::cout << "Client Started.." << std::endl;
+            EnableWindow(GetDlgItem(hWnd, IDC_BUTTON_PREARM_SAFE), true);
+            EnableWindow(GetDlgItem(hWnd, IDC_EDIT_PREARM_CODE), true);
+            EnableWindow(GetDlgItem(hWnd, IDC_LABEL_PREARM_CODE), true);
+            return 1;
+        }
+        else
+        {
+            DisplayMessageOkBox("Connection Failed!");
+            return 0;
+        }
                 
     }
     return 0;
 }
+
+static int OnChangePassword(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (IsClientConnected())
+    {
+        const char* msg = "Hello world";
+        SendPasswordToServer(msg);
+    }
+    return 1;
+}
+
 static int OnDisconnect(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (IsClientConnected())

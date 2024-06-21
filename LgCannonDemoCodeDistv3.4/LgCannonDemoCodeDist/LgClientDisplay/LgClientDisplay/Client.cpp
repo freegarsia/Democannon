@@ -24,6 +24,7 @@ static HANDLE hEndClientEvent = INVALID_HANDLE_VALUE;
 static SOCKET Client = INVALID_SOCKET;
 static SSL* sslClient = NULL;
 static SSL_CTX* sslCtx = NULL;
+static BIO* bio;
 
 static cv::Mat ImageIn;
 static DWORD ThreadClientID;
@@ -77,6 +78,16 @@ bool SendCodeToSever(unsigned char Code)
     return false;
 }
 
+bool SendPasswordToServer(const char* msg)
+{
+    if (IsClientConnected())
+    {
+        BIO_write(bio, msg, strlen(msg));
+        return true;
+    }
+    return false;
+}
+
 bool SendCalibToSever(unsigned char Code)
 {
     if (IsClientConnected())
@@ -87,6 +98,7 @@ bool SendCalibToSever(unsigned char Code)
         MsgCmd.Hdr.Len = htonl(sizeof(unsigned char));
         MsgCmd.Hdr.Type = htonl(MT_CALIB_COMMANDS);
         MsgCmd.Commands = Code;
+
         if (WriteDataTcp(Client, (unsigned char*)&MsgCmd, msglen) == msglen)
         {
             return true;
@@ -174,6 +186,40 @@ SSL_CTX* create_context() {
     return ctx;
 }
 
+
+void InitializeOpenSSL() {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+}
+
+void CleanupOpenSSL() {
+    EVP_cleanup();
+}
+
+SSL_CTX* CreateContext() {
+    const SSL_METHOD* method = SSLv23_client_method();
+    SSL_CTX* ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Unable to create SSL context");
+        ERR_print_errors_fp(stderr);
+        exit(EXIT_FAILURE);
+    }
+    return ctx;
+}
+
+void ConfigureContext(SSL_CTX* ctx) {
+    // 클라이언트 인증서를 설정합니다.
+    if (SSL_CTX_use_certificate_file(ctx, "C:/keys/client-cert.pem", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stdout);
+        exit(EXIT_FAILURE);
+    }
+    if (SSL_CTX_use_PrivateKey_file(ctx, "C:/keys/client-key.pem", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stdout);
+        exit(EXIT_FAILURE);
+    }
+}
+
+
 bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
 {
     int iResult;
@@ -188,60 +234,72 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
-    if (iResult != 0)
-    {
-        std::cout << "getaddrinfo: Failed" << std::endl;
-        return false;
-    }
-    if (result == NULL)
-    {
-        std::cout << "getaddrinfo: Failed" << std::endl;
-        return false;
-    }
+    //iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
+    //if (iResult != 0)
+    //{
+    //    std::cout << "getaddrinfo: Failed" << std::endl;
+    //    return false;
+    //}
+    //if (result == NULL)
+    //{
+    //    std::cout << "getaddrinfo: Failed" << std::endl;
+    //    return false;
+    //}
 
-    if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
-    {
-        freeaddrinfo(result);
-        std::cout << "video client socket() failed with error "<< WSAGetLastError() << std::endl;
-        return false;
-    }
+    //if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
+    //{
+    //    freeaddrinfo(result);
+    //    std::cout << "video client socket() failed with error "<< WSAGetLastError() << std::endl;
+    //    return false;
+    //}
 
     //----------------------
     // Connect to server.
-    iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
-    freeaddrinfo(result);
-    if (iResult == SOCKET_ERROR) {
-        std::cout << "connect function failed with error : "<< WSAGetLastError() << std::endl;
-        iResult = closesocket(Client);
-        Client = INVALID_SOCKET;
-        if (iResult == SOCKET_ERROR)
-            std::cout << "closesocket function failed with error :"<< WSAGetLastError() << std::endl;
+    //iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
+    //freeaddrinfo(result);
+    //if (iResult == SOCKET_ERROR) {
+    //    std::cout << "connect function failed with error : "<< WSAGetLastError() << std::endl;
+    //    iResult = closesocket(Client);
+    //    Client = INVALID_SOCKET;
+    //    if (iResult == SOCKET_ERROR)
+    //        std::cout << "closesocket function failed with error :"<< WSAGetLastError() << std::endl;
+    //    return false;
+    //}
+
+    //int yes = 1;
+    //iResult = setsockopt(Client,
+    //    IPPROTO_TCP,
+    //    TCP_NODELAY,
+    //    (char*)&yes,
+    //    sizeof(int));    // 1 - on, 0 - off
+    //if (iResult < 0)
+    //{
+    //    printf("TCP NODELAY Failed\n");
+    //}
+    //else  printf("TCP NODELAY SET\n");
+
+    InitializeOpenSSL();
+    sslCtx = CreateContext();
+    ConfigureContext(sslCtx);
+
+    bio = BIO_new_ssl_connect(sslCtx);
+
+    BIO_get_ssl(bio, &sslClient);
+    SSL_set_mode(sslClient, SSL_MODE_AUTO_RETRY);
+
+    BIO_set_conn_hostname(bio, "localhost:4443");
+
+    if (BIO_do_connect(bio) <= 0) {
+        ERR_print_errors_fp(stderr);
         return false;
     }
 
-    int yes = 1;
-    iResult = setsockopt(Client,
-        IPPROTO_TCP,
-        TCP_NODELAY,
-        (char*)&yes,
-        sizeof(int));    // 1 - on, 0 - off
-    if (iResult < 0)
-    {
-        printf("TCP NODELAY Failed\n");
+    if (BIO_do_handshake(bio) <= 0) {
+        ERR_print_errors_fp(stderr);
+        return false;
     }
-    else  printf("TCP NODELAY SET\n");
-
-    sslCtx = create_context();
-    sslClient = SSL_new(sslCtx);
-    SSL_set_fd(sslClient, Client);
-
-
-
-
 
     return true;
-
 }
 bool StartClient(void)
 {
@@ -257,6 +315,10 @@ bool StopClient(void)
         WaitForSingleObject(hThreadClient, INFINITE);
         CloseHandle(hThreadClient);
         hThreadClient = INVALID_HANDLE_VALUE;
+
+        BIO_free_all(bio);
+        SSL_CTX_free(sslCtx);
+        CleanupOpenSSL();
     }
 ;
     return true;
@@ -334,17 +396,6 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
  
     hClientEvent = WSACreateEvent();
 
-    // Perform the SSL/TLS handshake
-    if (SSL_connect(sslClient) <= 0) {
-        ERR_print_errors_fp(stderr);
-        SSL_free(sslClient);
-        SSL_CTX_free(sslCtx);
-        closesocket(Client);
-        WSACloseEvent(hClientEvent);
-        WSACleanup();
-        return 1;
-    }
-
     // Main loop to handle events
     while (true) {
         DWORD eventResult = WSAWaitForMultipleEvents(1, &hClientEvent, FALSE, WSA_INFINITE, FALSE);
@@ -361,30 +412,20 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
 
         if (networkEvents.lNetworkEvents & FD_READ) {
             char buf[1024];
-            int bytes = SSL_read(sslClient, buf, sizeof(buf));
+            int bytes = BIO_read(bio, buf, sizeof(buf) - 1);
             if (bytes > 0) {
                 buf[bytes] = '\0';
                 printf("Received: %s\n", buf);
             }
-            else if (bytes == 0) {
+            else {
                 printf("Connection closed by peer\n");
                 break;
-            }
-            else {
-                int err = SSL_get_error(sslClient, bytes);
-                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                    // SSL_read needs to be called again
-                    continue;
-                }
-                else {
-                    ERR_print_errors_fp(stderr);
-                    break;
-                }
             }
         }
 
         if (networkEvents.lNetworkEvents & FD_WRITE) {
-            // Handle writable socket (if needed)
+            const char request[] = "Hello from TLS client!";
+            BIO_write(bio, request, strlen(request));
         }
 
         if (networkEvents.lNetworkEvents & FD_CLOSE) {
@@ -403,6 +444,7 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
         InputBuffer = nullptr;
     }
     ClientCleanup();
+
     std::cout << "Client Exiting" << std::endl;
     return 0;
 }
