@@ -30,9 +30,9 @@
 #### IV. Local Testing
 
 ## Design documentation
-It will be attached in repo.
+Check "Design&Requirement Documentation.pdf"
 
 ## Requirements documentation
-It will be attached in repo.
+Check "Design&Requirement Documentation.pdf"
 
 
