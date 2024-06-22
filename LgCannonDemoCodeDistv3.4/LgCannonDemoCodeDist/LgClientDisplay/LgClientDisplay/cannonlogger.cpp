@@ -25,7 +25,7 @@ void cannonLogger_info(const char* l)
 {
 	if (Logger == NULL)
 		return;
-
+	
 	Logger->info(l);
 	Logger->flush();
 	std::cout << l << std::endl;
