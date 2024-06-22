@@ -653,20 +653,20 @@ static void DrawCrosshair(Mat &img, Point correct, const Scalar &color)
 //------------------------------------------------------------------------------------------------
 int main(int argc, const char** argv)
 {
-  Mat                              Frame,ResizedFrame;      // camera image in Mat format
-  float                            avfps=0.0,FPS[16]={0.0,0.0,0.0,0.0,
+    Mat                              Frame,ResizedFrame;      // camera image in Mat format
+    float                            avfps=0.0,FPS[16]={0.0,0.0,0.0,0.0,
                                                       0.0,0.0,0.0,0.0,
                                                       0.0,0.0,0.0,0.0,
                                                       0.0,0.0,0.0,0.0};
-  int                              retval,i,Fcnt = 0;
-  struct sockaddr_in               cli_addr;
-  socklen_t                        clilen;
-  chrono::steady_clock::time_point Tbegin, Tend;
+    int                              retval,i,Fcnt = 0;
+    struct sockaddr_in               cli_addr;
+    socklen_t                        clilen;
+    chrono::steady_clock::time_point Tbegin, Tend;
 
 #if defined(TLS_ENABLE)
     if (argc != 2) {
-      fprintf(stderr, "Usage: %s <password>\n", argv[0]);
-      exit(EXIT_FAILURE);
+        fprintf(stderr, "Usage: %s <password>\n", argv[0]);
+        exit(EXIT_FAILURE);
     }
 
     const char *password = argv[1];
@@ -678,15 +678,15 @@ int main(int argc, const char** argv)
     tls_init_openssl();
     cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
     if (cert == NULL) {
-      fprintf(stderr, "Decryption failed.1\n");
-      exit(EXIT_FAILURE);
+        fprintf(stderr, "Decryption failed.1\n");
+        exit(EXIT_FAILURE);
     }
     cert[cert_len] = 0;
 
     key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
     if (cert == NULL) {
-      fprintf(stderr, "Decryption failed.2\n");
-      exit(EXIT_FAILURE);
+        fprintf(stderr, "Decryption failed.2\n");
+        exit(EXIT_FAILURE);
     }
     key[key_len] = 0;
 
@@ -696,186 +696,187 @@ int main(int argc, const char** argv)
     //tls_test_server(&tls);
 #endif /*TLS_ENABLE*/
 
-  ReadOffsets();
+    ReadOffsets();
 
-  for (i = 0; i < 16; i++) FPS[i] = 0.0;
+    for (i = 0; i < 16; i++) FPS[i] = 0.0;
 
-  AutoEngage.State=NOT_ACTIVE;
-  AutoEngage.HaveFiringOrder=false;
-  AutoEngage.NumberOfTartgets=0;
+    AutoEngage.State=NOT_ACTIVE;
+    AutoEngage.HaveFiringOrder=false;
+    AutoEngage.NumberOfTartgets=0;
 
-  pthread_mutexattr_init(&TCP_MutexAttr);
-  pthread_mutexattr_settype(&TCP_MutexAttr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutexattr_init(&GPIO_MutexAttr);
-  pthread_mutexattr_settype(&GPIO_MutexAttr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutexattr_init(&I2C_MutexAttr);
-  pthread_mutexattr_settype(&I2C_MutexAttr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutexattr_init(&Engmnt_MutexAttr);
-  pthread_mutexattr_settype(&Engmnt_MutexAttr, PTHREAD_MUTEX_ERRORCHECK);
+    pthread_mutexattr_init(&TCP_MutexAttr);
+    pthread_mutexattr_settype(&TCP_MutexAttr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutexattr_init(&GPIO_MutexAttr);
+    pthread_mutexattr_settype(&GPIO_MutexAttr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutexattr_init(&I2C_MutexAttr);
+    pthread_mutexattr_settype(&I2C_MutexAttr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutexattr_init(&Engmnt_MutexAttr);
+    pthread_mutexattr_settype(&Engmnt_MutexAttr, PTHREAD_MUTEX_ERRORCHECK);
 
-  if (pthread_mutex_init(&TCP_Mutex, &TCP_MutexAttr)!=0) return -1;
-  if (pthread_mutex_init(&GPIO_Mutex, &GPIO_MutexAttr)!=0) return -1;
-  if (pthread_mutex_init(&I2C_Mutex, &I2C_MutexAttr)!=0) return -1;
-  if (pthread_mutex_init(&Engmnt_Mutex, &Engmnt_MutexAttr)!=0) return -1;
+    if (pthread_mutex_init(&TCP_Mutex, &TCP_MutexAttr)!=0) return -1;
+    if (pthread_mutex_init(&GPIO_Mutex, &GPIO_MutexAttr)!=0) return -1;
+    if (pthread_mutex_init(&I2C_Mutex, &I2C_MutexAttr)!=0) return -1;
+    if (pthread_mutex_init(&Engmnt_Mutex, &Engmnt_MutexAttr)!=0) return -1;
 
-  HaveOLED=OLEDInit();
+    HaveOLED=OLEDInit();
 
-  printf("OpenCV: Version %s\n",cv::getVersionString().c_str());
+    printf("OpenCV: Version %s\n",cv::getVersionString().c_str());
 
-  //printf("OpenCV: %s", cv::getBuildInformation().c_str());
+    //printf("OpenCV: %s", cv::getBuildInformation().c_str());
 
 #if USE_TFLITE
- printf("TensorFlow Lite Mode\n");
- detector = new ObjectDetector("../TfLite-2.17/Data/detect.tflite", false);
+    printf("TensorFlow Lite Mode\n");
+    detector = new ObjectDetector("../TfLite-2.17/Data/detect.tflite", false);
 #elif USE_IMAGE_MATCH
 
- printf("Image Match Mode\n");
+    printf("Image Match Mode\n");
 
- DetectedMatches = new  TDetectedMatches[MAX_DETECTED_MATCHES];
+    DetectedMatches = new  TDetectedMatches[MAX_DETECTED_MATCHES];
 
 
- if (LoadRefImages(symbols) == -1)
-   {
-    printf("Error reading reference symbols\n");
-    return -1;
-   }
+    if (LoadRefImages(symbols) == -1)
+    {
+        printf("Error reading reference symbols\n");
+        return -1;
+    }
 
 #endif
 
- if  ((TcpListenPort=OpenTcpListenPort(PORT))==NULL)  // Open UDP Network port
-     {
-       printf("OpenTcpListenPortFailed\n");
-       return(-1);
-     }
+    if  ((TcpListenPort=OpenTcpListenPort(PORT))==NULL)  // Open UDP Network port
+    {
+        printf("OpenTcpListenPortFailed\n");
+        return(-1);
+    }
 
-   OpenGPIO();
-   laser(false);
-   fire(false);
-   calibrate(false);
+    OpenGPIO();
+    laser(false);
+    fire(false);
+    calibrate(false);
 
-   OpenServos();
-   ServoAngle(PAN_SERVO, Pan);
-   ServoAngle(TILT_SERVO, Tilt);
+    OpenServos();
+    ServoAngle(PAN_SERVO, Pan);
+    ServoAngle(TILT_SERVO, Tilt);
 
-   Setup_Control_C_Signal_Handler_And_Keyboard_No_Enter(); // Set Control-c handler to properly exit clean
+    Setup_Control_C_Signal_Handler_And_Keyboard_No_Enter(); // Set Control-c handler to properly exit clean
 
-   printf("Listening for connections\n");
-   clilen = sizeof(cli_addr);
-   if  ((TcpConnectedPort=AcceptTcpConnection(TcpListenPort,&cli_addr,&clilen, &tls))==NULL)
-     {
-       printf("AcceptTcpConnection Failed\n");
-       return(-1);
-     }
-   isConnected=true;
-   printf("Accepted connection Request\n");
-   CloseTcpListenPort(&TcpListenPort);  // Close listen port
+    printf("Listening for connections\n");
+    clilen = sizeof(cli_addr);
+    if  ((TcpConnectedPort=AcceptTcpConnection(TcpListenPort,&cli_addr,&clilen, &tls))==NULL)
+    {
+        printf("AcceptTcpConnection Failed\n");
+        return(-1);
+    }
+    isConnected=true;
+    printf("Accepted connection Request\n");
+    CloseTcpListenPort(&TcpListenPort);  // Close listen port
 
-  if (!OpenCamera())
-     {
-      printf("Could not Open Camera\n");
-      return(-1);
-     }
-  else printf("Opened Camera\n");
+    if (!OpenCamera())
+    {
+        printf("Could not Open Camera\n");
+        return(-1);
+    }
+    else printf("Opened Camera\n");
 
-  CreateNoDataAvalable();
+    CreateNoDataAvalable();
 
 #if defined(TLS_ENABLE)
-  if (pthread_create(&NetworkThreadID, NULL,NetworkInputThread, &tls)!=0)
+    if (pthread_create(&NetworkThreadID, NULL,NetworkInputThread, &tls)!=0)
 #else /*TLS_ENABLE*/
-  if (pthread_create(&NetworkThreadID, NULL,NetworkInputThread, NULL)!=0)
+    if (pthread_create(&NetworkThreadID, NULL,NetworkInputThread, NULL)!=0)
 #endif /*TLS_ENABLE*/
-   {
-     printf("Failed to Create Network Input Thread\n");
-     exit(0);
-   }
-  if (pthread_create(&EngagementThreadID, NULL,EngagementThread, NULL)!=0)
-   {
-     printf("Failed to Create ,Engagement Thread\n");
-     exit(0);
-   }
+    {
+        printf("Failed to Create Network Input Thread\n");
+        exit(0);
+    }
+    if (pthread_create(&EngagementThreadID, NULL,EngagementThread, NULL)!=0)
+    {
+        printf("Failed to Create ,Engagement Thread\n");
+        exit(0);
+    }
 
-  do
-   {
-    Tbegin = chrono::steady_clock::now();
+    do
+    {
+        Tbegin = chrono::steady_clock::now();
 
-    if (!GetFrame(Frame))
+        if (!GetFrame(Frame))
         {
-         printf("ERROR! blank frame grabbed\n");
-         continue;
+            printf("ERROR! blank frame grabbed\n");
+            continue;
         }
 
-    HandleInputChar(Frame);                           // Handle Keyboard Input
+        HandleInputChar(Frame);                           // Handle Keyboard Input
 #if USE_TFLITE
 
-    DetectResult* res = detector->detect(Frame);
-    for (i = 0; i < detector->DETECT_NUM; ++i)
+        DetectResult* res = detector->detect(Frame);
+        for (i = 0; i < detector->DETECT_NUM; ++i)
         {
-	  int labelnum = res[i].label;
-	  float score = res[i].score;
-	  float xmin = res[i].xmin;
-	  float xmax = res[i].xmax;
-	  float ymin = res[i].ymin;
-	  float ymax = res[i].ymax;
-          int baseline=0;
+            int labelnum = res[i].label;
+            float score = res[i].score;
+            float xmin = res[i].xmin;
+            float xmax = res[i].xmax;
+            float ymin = res[i].ymin;
+            float ymax = res[i].ymax;
+            int baseline=0;
 
-          if (score<0.10) continue;
+            if (score<0.10) continue;
 
-          cv::rectangle(Frame, Point(xmin,ymin), Point(xmax,ymax), Scalar(10, 255, 0), 2);
-          cv::String label =to_string(labelnum) + ": " + to_string(int(score*100))+ "%";
+            cv::rectangle(Frame, Point(xmin,ymin), Point(xmax,ymax), Scalar(10, 255, 0), 2);
+            cv::String label =to_string(labelnum) + ": " + to_string(int(score*100))+ "%";
 
-          Size labelSize= cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2,&baseline); // Get font size
-          int label_ymin = std::max((int)ymin, (int)(labelSize.height + 10)); // Make sure not to draw label too close to top of window
-          rectangle(Frame, Point(xmin, label_ymin-labelSize.height-10), Point(xmin+labelSize.width, label_ymin+baseline-10), Scalar(255, 255, 255), cv::FILLED); // Draw white box to put label text in
-          putText(Frame, label, Point(xmin, label_ymin-7), cv::FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 0), 2); // Draw label text
-       }
-   delete[] res;
+            Size labelSize= cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2,&baseline); // Get font size
+            int label_ymin = std::max((int)ymin, (int)(labelSize.height + 10)); // Make sure not to draw label too close to top of window
+            rectangle(Frame, Point(xmin, label_ymin-labelSize.height-10), Point(xmin+labelSize.width, label_ymin+baseline-10), Scalar(255, 255, 255), cv::FILLED); // Draw white box to put label text in
+            putText(Frame, label, Point(xmin, label_ymin-7), cv::FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 0), 2); // Draw label text
+        }
+        delete[] res;
 #elif USE_IMAGE_MATCH
-         TEngagementState tmpstate=AutoEngage.State;
+        TEngagementState tmpstate=AutoEngage.State;
 
-         if (tmpstate!=ENGAGEMENT_IN_PROGRESS) FindTargets(Frame);
-         ProcessTargetEngagements(&AutoEngage,Frame.cols,Frame.rows);
-         if (tmpstate!=ENGAGEMENT_IN_PROGRESS) DrawTargets(Frame);
+        if (tmpstate!=ENGAGEMENT_IN_PROGRESS) FindTargets(Frame);
+        ProcessTargetEngagements(&AutoEngage,Frame.cols,Frame.rows);
+        if (tmpstate!=ENGAGEMENT_IN_PROGRESS) DrawTargets(Frame);
 #endif
 #define FPS_XPOS 0
 #define FPS_YPOS 20
-    cv::String FPS_label =format("FPS %0.2f",avfps / 16);
-    int FPS_baseline=0;
+        cv::String FPS_label =format("FPS %0.2f",avfps / 16);
+        int FPS_baseline=0;
 
-    Size FPS_labelSize= cv::getTextSize(FPS_label, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2,&FPS_baseline); // Get font size
-    int FPS_label_ymin = std::max((int)FPS_YPOS, (int)(FPS_labelSize.height + 10)); // Make sure not to draw label too close to top of window
-    rectangle(Frame, Point(FPS_XPOS, FPS_label_ymin-FPS_labelSize.height-10), Point(FPS_XPOS+FPS_labelSize.width, FPS_label_ymin+FPS_baseline-10), Scalar(255, 255, 255), cv::FILLED); // Draw white box to put label text in
-    putText(Frame, FPS_label, Point(FPS_XPOS, FPS_label_ymin-7), cv::FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 0), 2); // Draw label text
+        Size FPS_labelSize= cv::getTextSize(FPS_label, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2,&FPS_baseline); // Get font size
+        int FPS_label_ymin = std::max((int)FPS_YPOS, (int)(FPS_labelSize.height + 10)); // Make sure not to draw label too close to top of window
+        rectangle(Frame, Point(FPS_XPOS, FPS_label_ymin-FPS_labelSize.height-10), Point(FPS_XPOS+FPS_labelSize.width, FPS_label_ymin+FPS_baseline-10), Scalar(255, 255, 255), cv::FILLED); // Draw white box to put label text in
+        putText(Frame, FPS_label, Point(FPS_XPOS, FPS_label_ymin-7), cv::FONT_HERSHEY_SIMPLEX, 0.7, Scalar(0, 0, 0), 2); // Draw label text
 
-   if (SystemState==SAFE)
-      {
-        Frame=NoDataAvalable.clone();
-        resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
-      }
-   else
-     {
-      resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
-      DrawCrosshair(ResizedFrame,Point((int)xCorrect,(int)yCorrect),Scalar(0, 0, 255)); //BGR
-     }
-
+        if (SystemState==SAFE)
+        {
+            Frame=NoDataAvalable.clone();
+            resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
+        }
+        else
+        {
+            resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
+            DrawCrosshair(ResizedFrame,Point((int)xCorrect,(int)yCorrect),Scalar(0, 0, 255)); //BGR
+        }
+#if 0
 #if defined(TLS_ENABLE)
-    if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls)<0))  break;
+        if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls)<0))  break;
 #else /*TLS_ENABLE*/
-    if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame)<0))  break;
+        if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame)<0))  break;
 #endif /*TLS_ENABLE*/
+#endif
 
 
-    Tend = chrono::steady_clock::now();
-    avfps = chrono::duration_cast <chrono::milliseconds> (Tend - Tbegin).count();
-    if (avfps > 0.0) FPS[((Fcnt++) & 0x0F)] = 1000.0 / avfps;
-    for (avfps = 0.0, i = 0; i < 16; i++) { avfps += FPS[i]; }
-  } while (isConnected);
+        Tend = chrono::steady_clock::now();
+        avfps = chrono::duration_cast <chrono::milliseconds> (Tend - Tbegin).count();
+        if (avfps > 0.0) FPS[((Fcnt++) & 0x0F)] = 1000.0 / avfps;
+        for (avfps = 0.0, i = 0; i < 16; i++) { avfps += FPS[i]; }
+    } while (isConnected);
 
-  printf("Main Thread Exiting\n");
-  CleanUp();
+    printf("Main Thread Exiting\n");
+    CleanUp();
 #if defined(TLS_ENABLE)
-  tls_cleanup_openssl(&tls);
+    tls_cleanup_openssl(&tls);
 #endif /*TLS_ENABLE*/
-  return 0;
+    return 0;
 }
 //------------------------------------------------------------------------------------------------
 // End main
@@ -1005,7 +1006,7 @@ static void ProcessPreArm(char * Code)
     if ((Code[sizeof(Decode)]==0) && (strlen(Code)==sizeof(Decode)))
       {
         for (int i=0;i<sizeof(Decode);i++) Code[i]^=Decode[i];
-        if (strcmp((const char*)Code,"PREARMED")==0)
+        if (strcmp((const char*)Code,"PREARMED")==0) /*12345678*/
           {
             SystemState=PREARMED;
             SendSystemState(SystemState);
@@ -1279,93 +1280,101 @@ static void ProcessCalibCommands(unsigned char cmd)
 //------------------------------------------------------------------------------------------------
 static void *NetworkInputThread(void *data)
 {
- unsigned char Buffer[512];
- TMesssageHeader *MsgHdr;
- int fd=TcpConnectedPort->ConnectedFd,retval;
+    unsigned char Buffer[512];
+    TMesssageHeader *MsgHdr;
+    int fd=TcpConnectedPort->ConnectedFd,retval;
 
- SendSystemState(SystemState);
- #if defined(TLS_ENABLE)
+    SendSystemState(SystemState);
+#if defined(TLS_ENABLE)
     st_tls* p_tls = (st_tls*)data;
 #endif /*TLS_ENABLE*/
 
- while (1)
- {
+    while (1)
+    {
+#if 0
+        char log[128] = {0,};
+        memset(log, 0, sizeof(log));
+        const int read_num = SSL_read(p_tls->ssl, &log, sizeof(log));
+        printf("read(%d, %s)", read_num, log);
+        continue;
+#endif
+
 #if defined(TLS_ENABLE)
-    if ((retval=SSL_read(p_tls->ssl, &Buffer, sizeof(TMesssageHeader))) != sizeof(TMesssageHeader))
+        if ((retval=SSL_read(p_tls->ssl, &Buffer, sizeof(TMesssageHeader))) != sizeof(TMesssageHeader))
 #else /*TLS_ENABLE*/
-   if ((retval=recv(fd, &Buffer, sizeof(TMesssageHeader),0)) != sizeof(TMesssageHeader))
+        if ((retval=recv(fd, &Buffer, sizeof(TMesssageHeader),0)) != sizeof(TMesssageHeader))
 #endif /*TLS_ENABLE*/
-     {
-      if (retval==0) printf("Client Disconnnected\n");
-      else printf("Connecton Lost %s\n", strerror(errno));
-      break;
-     }
-   MsgHdr=(TMesssageHeader *)Buffer;
-   MsgHdr->Len = ntohl(MsgHdr->Len);
-   MsgHdr->Type = ntohl(MsgHdr->Type);
+        {
+            if (retval==0) printf("Client Disconnnected\n");
+            else printf("Connecton Lost %s\n", strerror(errno));
+            //break;
+        }
+        MsgHdr=(TMesssageHeader *)Buffer;
+        MsgHdr->Len = ntohl(MsgHdr->Len);
+        MsgHdr->Type = ntohl(MsgHdr->Type);
 
-   if (MsgHdr->Len+sizeof(TMesssageHeader)>sizeof(Buffer))
-     {
-      printf("oversized message error %d\n",MsgHdr->Len);
-      break;
-     }
+        if (MsgHdr->Len+sizeof(TMesssageHeader)>sizeof(Buffer))
+        {
+            printf("oversized message error %d\n",MsgHdr->Len);
+            //break;
+        }
 
 #if defined(TLS_ENABLE)
-       if ((retval=SSL_read(p_tls->ssl, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len)) !=  MsgHdr->Len)
+        if ((retval=SSL_read(p_tls->ssl, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len)) !=  MsgHdr->Len)
 #else /*TLS_ENABLE*/
          if ((retval=recv(fd, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len,0)) !=  MsgHdr->Len)
 #endif /*TLS_ENABLE*/
-     {
-      if (retval==0) printf("Client Disconnnected\n");
-      else printf("Connecton Lost %s\n", strerror(errno));
-      break;
-     }
+        {
+            if (retval==0) printf("Client Disconnnected\n");
+            else printf("Connecton Lost %s\n", strerror(errno));
+            //break;
+        }
 
-   switch(MsgHdr->Type)
-    {
-      case MT_COMMANDS:
-      {
-       TMesssageCommands *msgCmds=(TMesssageCommands *)Buffer;
-       ProcessCommands(msgCmds->Commands);
-      }
-      break;
-      case MT_CALIB_COMMANDS:
-      {
-       TMesssageCalibCommands *msgCmds=(TMesssageCalibCommands *)Buffer;
-       ProcessCalibCommands(msgCmds->Commands);
-      }
-      break;
+        switch(MsgHdr->Type)
+        {
+            case MT_COMMANDS:
+            {
+                TMesssageCommands *msgCmds=(TMesssageCommands *)Buffer;
+                ProcessCommands(msgCmds->Commands);
+            }
+            break;
+            case MT_CALIB_COMMANDS:
+            {
+                TMesssageCalibCommands *msgCmds=(TMesssageCalibCommands *)Buffer;
+                ProcessCalibCommands(msgCmds->Commands);
+            }
+            break;
 
-      case MT_TARGET_SEQUENCE:
-      {
-       TMesssageTargetOrder *msgTargetOrder=(TMesssageTargetOrder *)Buffer;
-       ProcessFiringOrder(msgTargetOrder->FiringOrder);
-      }
-      break;
-      case MT_PREARM:
-      {
-       TMesssagePreArm *msgPreArm=(TMesssagePreArm *)Buffer;
-       ProcessPreArm(msgPreArm->Code);
-      }
-      break;
-      case MT_STATE_CHANGE_REQ:
-      {
-       TMesssageChangeStateRequest *msgChangeStateRequest=(TMesssageChangeStateRequest *)Buffer;
-       msgChangeStateRequest->State=(SystemState_t)ntohl(msgChangeStateRequest->State);
+            case MT_TARGET_SEQUENCE:
+            {
+                TMesssageTargetOrder *msgTargetOrder=(TMesssageTargetOrder *)Buffer;
+                ProcessFiringOrder(msgTargetOrder->FiringOrder);
+            }
+            break;
+            case MT_PREARM:
+            {
+                TMesssagePreArm *msgPreArm=(TMesssagePreArm *)Buffer;
+                ProcessPreArm(msgPreArm->Code);
+            }
+            break;
+            case MT_STATE_CHANGE_REQ:
+            {
+                TMesssageChangeStateRequest *msgChangeStateRequest=(TMesssageChangeStateRequest *)Buffer;
+                msgChangeStateRequest->State=(SystemState_t)ntohl(msgChangeStateRequest->State);
 
-       ProcessStateChangeRequest(msgChangeStateRequest->State);
-      }
-      break;
+                ProcessStateChangeRequest(msgChangeStateRequest->State);
+            }
+            break;
 
-      default:
-       printf("Invalid Message Type\n");
-      break;
+            default:
+                printf("Invalid Message Type\n");
+                break;
+        }
     }
-  }
-   isConnected=false;
-   NetworkThreadID=-1; // Temp Fix OS probem determining if thread id are valid
-   printf("Network Thread Exit\n");
-   return NULL;
+    isConnected=false;
+    NetworkThreadID=-1; // Temp Fix OS probem determining if thread id are valid
+    printf("Network Thread Exit\n");
+    return NULL;
  }
 //------------------------------------------------------------------------------------------------
 // END static void *NetworkInputThread
