@@ -62,6 +62,9 @@
 
 #define PREFIRE_SOUND IDR_WAVE1
 
+#define MAX_PASSWORD_LENGTH     256
+#define MAX_FILEPATH_LENGTH     256
+
 // Global Variables:
 
 HWND hWndMain;
@@ -78,6 +81,10 @@ static char RemoteAddress[512]="raspberrypi.local";
 static char EngagementOrder[512] = "0123456789";
 static char PreArmCode[512] = "";
 
+static TCHAR userPassword[MAX_PASSWORD_LENGTH] = _T("");
+static TCHAR filePath[MAX_FILEPATH_LENGTH] = _T("");
+static bool is_password_same = false;
+static TCHAR password_for_change[MAX_PASSWORD_LENGTH] = _T("");
 
 static FILE* pCout = NULL;
 static HWND hWndMainToolbar;
@@ -102,6 +109,46 @@ static void DisplayMessageOkBox(const char* Msg);
 static bool OnlyOneInstance(void);
 
 
+INT_PTR CALLBACK DialogProc_PW(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    UNREFERENCED_PARAMETER(lParam);
+    switch (message)
+    {
+    case WM_INITDIALOG:
+        return (INT_PTR)TRUE;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IDOK:
+            unsigned char* key;
+            TCHAR password_1[MAX_PASSWORD_LENGTH];
+            TCHAR password_2[MAX_PASSWORD_LENGTH];
+
+            GetDlgItemText(hDlg, IDC_CH_PW1, password_1, MAX_PASSWORD_LENGTH);
+            GetDlgItemText(hDlg, IDC_CH_PW2, password_2, MAX_PASSWORD_LENGTH);
+
+            if (_tcscmp(password_1, password_2) == 0)
+            {
+                std::cout << "password is same" << std::endl;
+                is_password_same = true;
+                _tcscpy_s(password_for_change, MAX_PASSWORD_LENGTH, password_1);
+            } 
+            else 
+            {
+                std::cout << "password is differenct" << std::endl;
+                is_password_same = false;
+            }
+
+            EndDialog(hDlg, LOWORD(wParam));
+            return (INT_PTR)TRUE;
+        case IDCANCEL:
+            EndDialog(hDlg, LOWORD(wParam));
+            return (INT_PTR)TRUE;
+        }
+    }
+    return (INT_PTR)FALSE;
+}
 
 INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -141,6 +188,11 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
         }
         break;
         case IDOK:
+            GetDlgItemText(hDlg, IDC_KEY_LOC, filePath, sizeof(filePath) / sizeof(TCHAR));
+            GetDlgItemText(hDlg, IDC_USER_PASSWORD, userPassword, sizeof(userPassword) / sizeof(TCHAR));
+
+            EndDialog(hDlg, IDOK);
+            return (INT_PTR)TRUE;
         case IDCANCEL:
             EndDialog(hDlg, LOWORD(wParam));
             return (INT_PTR)TRUE;
@@ -198,74 +250,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     INT_PTR ret = DialogBoxW(hInstance, MAKEINTRESOURCE(IDD_LOAD_KEYS), NULL, DialogProc);
     if (ret == IDOK) {
         wchar_t OK_msg[] = L"OK is clicked";
-        using namespace CryptoPP;
+        cannonLogger_info("Try Key file decryption");
+        
+        unsigned char *key;
+        int decrypted_len = 0;
 
-        // AES 키와 IV 설정 (암호화와 복호화에 동일하게 사용해야 함)
-        byte key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                                        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
-        byte iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
-
-        // 원문 설정
-        std::string plaintext = "Hello, Crypto++! This is a test message.";
-
-        // 암호화
-        std::string ciphertext;
-        try
-        {
-            CBC_Mode<AES>::Encryption encryption;
-            encryption.SetKeyWithIV(key, AES::DEFAULT_KEYLENGTH, iv);
-
-            // 암호화된 텍스트를 Base64로 인코딩 (옵션)
-            StringSource(plaintext, true,
-                new StreamTransformationFilter(encryption,
-                    new StringSink(ciphertext)
-                )
-            );
-
-            // Base64 인코딩 (옵션)
-            std::string encoded;
-            StringSource ss(ciphertext, true,
-                new Base64Encoder(
-                    new CryptoPP::StringSink(encoded)
-                )
-            );
-
-            ciphertext = encoded;
-        }
-        catch (const CryptoPP::Exception& e)
-        {
-            cannonLogger_error("Password is not correct");
-
-            std::cerr << "Crypto++ exception: " << e.what() << std::endl;
+        if (filePath[0] == _T('\0') || userPassword[0] == _T('\0')) {
+            DisplayMessageOkBox("Key path and Password is not inserted!!");
             //return 1;
         }
 
-        // 암호화된 텍스트 출력
-        std::cout << "Encrypted text: " << ciphertext << std::endl;
+        try{
+            char converted_filaPath[256];
+            char converted_password[256];
+            size_t filePath_size = sizeof(converted_filaPath);
+            size_t password_size = sizeof(converted_password);
+            
+            size_t convertedChars = 0;
+            size_t convertedChars2 = 0;
 
-        // 복호화
-        std::string decryptedtext;
-        try
-        {
-            byte dec_key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                                        0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x00 };
-            CBC_Mode<AES>::Decryption decryption;
-            decryption.SetKeyWithIV(dec_key, AES::DEFAULT_KEYLENGTH, iv);
+            wcstombs_s(&convertedChars, converted_filaPath, filePath_size, filePath, _TRUNCATE);
+            wcstombs_s(&convertedChars2, converted_password, password_size, userPassword, _TRUNCATE);
 
-            // Base64 디코딩 (옵션)
-            std::string decoded;
-            CryptoPP::StringSource ss(ciphertext, true,
-                new CryptoPP::Base64Decoder(
-                    new CryptoPP::StringSink(decoded)
-                )
-            );
-
-            // 복호화
-            StringSource(decoded, true,
-                new StreamTransformationFilter(decryption,
-                    new StringSink(decryptedtext)
-                )
-            );
+            key = tls_alloc_decrypt_file(converted_filaPath, converted_password, &decrypted_len);
         }
         catch (const CryptoPP::Exception& e)
         {
@@ -274,7 +281,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // 결과 출력
-        std::cout << "Decrypted text: " << decryptedtext << std::endl;
+        std::cout << "Decrypted text: " << key << std::endl;
     }
     else if (ret == IDCANCEL) {
         cannonLogger_info("KEY location setting is terminated");
@@ -619,9 +626,22 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
                 break;
             case IDM_CHANGE_PASSWORD:
                 cannonLogger_info("Password changement executed");
-                DisplayMessageOkBox("Let's change password!!");
-                
-                OnChangePassword(hWnd, message, wParam, lParam);                
+
+                INT_PTR ret;
+                ret = DialogBoxW(NULL, MAKEINTRESOURCE(IDD_CHANGE_PW), NULL, DialogProc_PW);
+                if (ret == IDOK) {
+                    cannonLogger_info("Try to change password");
+                    // if password is same inserted, then send password to server
+                    if (is_password_same == true) {
+                        is_password_same = false;
+                        OnChangePassword(hWnd, message, wParam, lParam);
+                    }
+
+                }
+                else if (ret == IDCANCEL) {
+                    cannonLogger_info("Changing password is canceled");
+                    return 1;
+                }
                 break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
@@ -1023,8 +1043,13 @@ static int OnChangePassword(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 {
     if (IsClientConnected())
     {
-        const char* msg = "Hello world";
-        SendPasswordToServer(msg);
+        char converted[MAX_PASSWORD_LENGTH];
+        size_t password_size = sizeof(password_for_change);
+
+        size_t convertedChars = 0;
+        wcstombs_s(&convertedChars, converted, password_size, password_for_change, _TRUNCATE);
+
+        SendPasswordToServer(converted);
     }
     return 1;
 }

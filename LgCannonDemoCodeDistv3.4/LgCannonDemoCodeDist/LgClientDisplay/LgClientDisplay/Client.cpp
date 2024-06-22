@@ -12,6 +12,7 @@
 #include "LgClientDisplay.h"
 #include "TcpSendRecv.h"
 #include "DisplayImage.h"
+#include "tls.h"
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -22,9 +23,8 @@ static  std::vector<uchar> sendbuff;//buffer for coding
 static HANDLE hClientEvent = INVALID_HANDLE_VALUE;
 static HANDLE hEndClientEvent = INVALID_HANDLE_VALUE;
 static SOCKET Client = INVALID_SOCKET;
-static SSL* sslClient = NULL;
-static SSL_CTX* sslCtx = NULL;
-static BIO* bio;
+static SSL* ssl = NULL;
+static SSL_CTX* ctx = NULL;
 
 static cv::Mat ImageIn;
 static DWORD ThreadClientID;
@@ -69,7 +69,8 @@ bool SendCodeToSever(unsigned char Code)
         MsgCmd.Hdr.Len = htonl(sizeof(unsigned char));
         MsgCmd.Hdr.Type = htonl(MT_COMMANDS);
         MsgCmd.Commands = Code;
-        if (WriteDataTcp(Client, (unsigned char *)&MsgCmd, msglen)== msglen)
+        //if (WriteDataTcp(Client, (unsigned char *)&MsgCmd, msglen)== msglen)
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgCmd, msglen) == msglen)
         {
             return true;
         }
@@ -82,7 +83,7 @@ bool SendPasswordToServer(const char* msg)
 {
     if (IsClientConnected())
     {
-        BIO_write(bio, msg, strlen(msg));
+        SSL_write(ssl, msg, strlen(msg));
         return true;
     }
     return false;
@@ -117,7 +118,8 @@ bool SendTargetOrderToSever(char* TargetOrder)
         MsgTargetOrder.Hdr.Len = htonl((int)strlen((const char*)TargetOrder)+1);
         MsgTargetOrder.Hdr.Type = htonl(MT_TARGET_SEQUENCE);
         strcpy_s((char*)MsgTargetOrder.FiringOrder,sizeof(MsgTargetOrder.FiringOrder),TargetOrder);
-        if (WriteDataTcp(Client, (unsigned char*)&MsgTargetOrder, msglen) == msglen)
+        /*if (WriteDataTcp(Client, (unsigned char*)&MsgTargetOrder, msglen) == msglen)*/
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgTargetOrder, msglen) == msglen)
         {
             return true;
         }
@@ -153,58 +155,14 @@ bool SendStateChangeRequestToSever(SystemState_t State)
         MsgChangeStateRequest.Hdr.Len = htonl(sizeof(MsgChangeStateRequest.State));
         MsgChangeStateRequest.Hdr.Type = htonl(MT_STATE_CHANGE_REQ);
         MsgChangeStateRequest.State = (SystemState_t)htonl(State);
-        if (WriteDataTcp(Client, (unsigned char*)&MsgChangeStateRequest, msglen) == msglen)
+        //if (WriteDataTcp(Client, (unsigned char*)&MsgChangeStateRequest, msglen) == msglen)
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgChangeStateRequest, msglen) == msglen)
         {
             return true;
         }
 
     }
     return false;
-}
-
-void initialize_openssl() {
-    SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
-}
-
-void cleanup_openssl() {
-    EVP_cleanup();
-}
-
-SSL_CTX* create_context() {
-    const SSL_METHOD* method;
-    SSL_CTX* ctx;
-
-    method = SSLv23_client_method();
-    ctx = SSL_CTX_new(method);
-    if (!ctx) {
-        perror("Unable to create SSL context");
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-
-    return ctx;
-}
-
-
-void InitializeOpenSSL() {
-    SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
-}
-
-void CleanupOpenSSL() {
-    EVP_cleanup();
-}
-
-SSL_CTX* CreateContext() {
-    const SSL_METHOD* method = SSLv23_client_method();
-    SSL_CTX* ctx = SSL_CTX_new(method);
-    if (!ctx) {
-        perror("Unable to create SSL context");
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
-    }
-    return ctx;
 }
 
 void ConfigureContext(SSL_CTX* ctx) {
@@ -219,13 +177,47 @@ void ConfigureContext(SSL_CTX* ctx) {
     }
 }
 
-
 bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
 {
     int iResult;
     struct addrinfo   hints;
     struct addrinfo* result = NULL;
     char remoteportno[128];
+    struct sockaddr_in addr;
+
+    ERR_load_crypto_strings();
+    OpenSSL_add_all_algorithms();
+
+    tls_init_openssl();
+    ctx = tls_create_context();
+    ConfigureContext(ctx);
+
+    Client = socket(AF_INET, SOCK_STREAM, 0);
+    if (Client < 0) {
+        perror("Unable to create socket");
+        exit(EXIT_FAILURE);
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(4443);
+    inet_pton(AF_INET, "localhost", &addr.sin_addr);
+
+    if (connect(Client, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("Unable to connect");
+        exit(EXIT_FAILURE);
+        return false;
+    }
+
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, Client);
+
+    if (SSL_connect(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+
+
 
     sprintf_s(remoteportno,sizeof(remoteportno), "%d", remoteport);
 
@@ -234,17 +226,17 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    //iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
-    //if (iResult != 0)
-    //{
-    //    std::cout << "getaddrinfo: Failed" << std::endl;
-    //    return false;
-    //}
-    //if (result == NULL)
-    //{
-    //    std::cout << "getaddrinfo: Failed" << std::endl;
-    //    return false;
-    //}
+    /*iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
+    if (iResult != 0)
+    {
+        std::cout << "getaddrinfo: Failed" << std::endl;
+        return false;
+    }
+    if (result == NULL)
+    {
+        std::cout << "getaddrinfo: Failed" << std::endl;
+        return false;
+    }*/
 
     //if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
     //{
@@ -253,8 +245,8 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     //    return false;
     //}
 
-    //----------------------
-    // Connect to server.
+    ////----------------------
+    //// Connect to server.
     //iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
     //freeaddrinfo(result);
     //if (iResult == SOCKET_ERROR) {
@@ -278,28 +270,9 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     //}
     //else  printf("TCP NODELAY SET\n");
 
-    InitializeOpenSSL();
-    sslCtx = CreateContext();
-    ConfigureContext(sslCtx);
-
-    bio = BIO_new_ssl_connect(sslCtx);
-
-    BIO_get_ssl(bio, &sslClient);
-    SSL_set_mode(sslClient, SSL_MODE_AUTO_RETRY);
-
-    BIO_set_conn_hostname(bio, "localhost:4443");
-
-    if (BIO_do_connect(bio) <= 0) {
-        ERR_print_errors_fp(stderr);
-        return false;
-    }
-
-    if (BIO_do_handshake(bio) <= 0) {
-        ERR_print_errors_fp(stderr);
-        return false;
-    }
 
     return true;
+
 }
 bool StartClient(void)
 {
@@ -316,9 +289,12 @@ bool StopClient(void)
         CloseHandle(hThreadClient);
         hThreadClient = INVALID_HANDLE_VALUE;
 
-        BIO_free_all(bio);
-        SSL_CTX_free(sslCtx);
-        CleanupOpenSSL();
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        closesocket(Client);
+        SSL_CTX_free(ctx);
+        tls_cleanup_openssl();
+
     }
 ;
     return true;
@@ -372,84 +348,6 @@ void ProcessMessage(char* MsgBuffer)
 }
 
 static DWORD WINAPI ThreadClient(LPVOID ivalue)
-{    
-    HANDLE ghEvents[2];
-    int NumEvents;
-    int iResult;
-    DWORD dwEvent;
-    InputMode Mode = MsgHeader;
-    unsigned int InputBytesNeeded=sizeof(TMesssageHeader);
-    TMesssageHeader MsgHdr;
-    char* InputBuffer = NULL;
-    char* InputBufferWithOffset = NULL;
-    unsigned int CurrentInputBufferSize = 1024 * 10;
-  
-    InputBuffer = (char*)std::realloc(InputBuffer, CurrentInputBufferSize);
-    InputBufferWithOffset = InputBuffer;
-
-    if (InputBuffer == NULL)
-    {
-      std::cout << "InputBuffer Realloc failed" << std::endl;
-      ExitProcess(0);
-      return 1;
-    }
- 
-    hClientEvent = WSACreateEvent();
-
-    // Main loop to handle events
-    while (true) {
-        DWORD eventResult = WSAWaitForMultipleEvents(1, &hClientEvent, FALSE, WSA_INFINITE, FALSE);
-        if (eventResult == WSA_WAIT_FAILED) {
-            perror("WSAWaitForMultipleEvents failed");
-            break;
-        }
-
-        WSANETWORKEVENTS networkEvents;
-        if (WSAEnumNetworkEvents(Client, hClientEvent, &networkEvents) == SOCKET_ERROR) {
-            perror("WSAEnumNetworkEvents failed");
-            break;
-        }
-
-        if (networkEvents.lNetworkEvents & FD_READ) {
-            char buf[1024];
-            int bytes = BIO_read(bio, buf, sizeof(buf) - 1);
-            if (bytes > 0) {
-                buf[bytes] = '\0';
-                printf("Received: %s\n", buf);
-            }
-            else {
-                printf("Connection closed by peer\n");
-                break;
-            }
-        }
-
-        if (networkEvents.lNetworkEvents & FD_WRITE) {
-            const char request[] = "Hello from TLS client!";
-            BIO_write(bio, request, strlen(request));
-        }
-
-        if (networkEvents.lNetworkEvents & FD_CLOSE) {
-            printf("Connection closed\n");
-            break;
-        }
-
-        // Reset the event
-        WSAResetEvent(hClientEvent);
-    }
-
-
-    if (InputBuffer)
-    {
-        std::free(InputBuffer);
-        InputBuffer = nullptr;
-    }
-    ClientCleanup();
-
-    std::cout << "Client Exiting" << std::endl;
-    return 0;
-}
-
-static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
 {
     HANDLE ghEvents[2];
     int NumEvents;
@@ -476,7 +374,6 @@ static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
     hEndClientEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (WSAEventSelect(Client, hClientEvent, FD_READ | FD_CLOSE) == SOCKET_ERROR)
-
     {
         std::cout << "WSAEventSelect() failed with error " << WSAGetLastError() << std::endl;
         iResult = closesocket(Client);
@@ -516,7 +413,8 @@ static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
                     else
                     {
                         int iResult;
-                        iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+                        //iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+                        iResult = ReadDataTLSNoBlock(ssl, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
                         if (iResult != SOCKET_ERROR)
                         {
                             if (iResult == 0)

@@ -32,8 +32,8 @@ openssl s_server -cert server-cert.pem -key server-key.pem -CAfile ca-cert.pem -
 openssl s_client -cert client-cert.pem -key client-key.pem -CAfile ca-cert.pem -connect 127.0.0.1:4443
 
 9) encryption of AES-256-CBC
-openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222
-openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222
+openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222    
+openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222 
 ==============================================================================================================*/
 
 
@@ -43,9 +43,9 @@ openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11
 void tls_init_openssl() {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
-
+    
     ERR_load_crypto_strings();
-    OpenSSL_add_all_algorithms();
+    OpenSSL_add_all_algorithms();    
 }
 
 void tls_handleErrors(void)
@@ -60,8 +60,8 @@ void tls_cleanup_openssl() {
 }
 
 SSL_CTX* tls_create_context() {
-    const SSL_METHOD* method;
-    SSL_CTX* ctx;
+    const SSL_METHOD *method;
+    SSL_CTX *ctx;
 
     method = TLS_client_method();
     ctx = SSL_CTX_new(method);
@@ -73,7 +73,7 @@ SSL_CTX* tls_create_context() {
     return ctx;
 }
 
-void tls_configure_context_file(SSL_CTX* ctx, const char* sz_cert, const char* sz_key, const char* sz_ca_cert) {
+void tls_configure_context_file(SSL_CTX *ctx, const char* sz_cert, const char* sz_key, const char* sz_ca_cert) {
     SSL_CTX_set_ecdh_auto(ctx, 1);
 
     // Set the certificate and key
@@ -98,15 +98,15 @@ void tls_configure_context_file(SSL_CTX* ctx, const char* sz_cert, const char* s
     SSL_CTX_set_verify_depth(ctx, 4);
 }
 
-void tls_configure_context(SSL_CTX* ctx, const char* cert, const char* key, const char* sz_ca_cert) {
+void tls_configure_context(SSL_CTX *ctx, const char *cert, const char *key, const char* sz_ca_cert) {
     SSL_CTX_set_ecdh_auto(ctx, 1);
 
     // Load server's certificate and private key from memory
-    BIO* cert_bio = BIO_new_mem_buf((void*)cert, -1);
-    BIO* key_bio = BIO_new_mem_buf((void*)key, -1);
+    BIO *cert_bio = BIO_new_mem_buf((void*)cert, -1);
+    BIO *key_bio = BIO_new_mem_buf((void*)key, -1);
 
-    X509* certificate = PEM_read_bio_X509(cert_bio, NULL, 0, NULL);
-    EVP_PKEY* pkey = PEM_read_bio_PrivateKey(key_bio, NULL, 0, NULL);
+    X509 *certificate = PEM_read_bio_X509(cert_bio, NULL, 0, NULL);
+    EVP_PKEY *pkey = PEM_read_bio_PrivateKey(key_bio, NULL, 0, NULL);
 
     if (SSL_CTX_use_certificate(ctx, certificate) <= 0) {
         ERR_print_errors_fp(stderr);
@@ -137,15 +137,14 @@ void tls_configure_context(SSL_CTX* ctx, const char* cert, const char* key, cons
 
 // Function to decrypt the file
 /*
-openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222
-openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222
+openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222    
+openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222 
 */
-unsigned char* tls_alloc_decrypt_file(const char* input_file, const char* password, int* decrypted_len) {
-    FILE* ifp = NULL;
-    errno_t err;
-
-    err = fopen_s(&ifp, input_file, "rb");
-    if (!ifp) {
+unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *password, int *decrypted_len) {
+    FILE* ifp;
+    errno_t err = fopen_s(&ifp, input_file, "rb"); 
+    
+    if (err != 0) {
         perror("File opening failed");
         return NULL;
     }
@@ -155,7 +154,7 @@ unsigned char* tls_alloc_decrypt_file(const char* input_file, const char* passwo
 
     // Read the magic text and salt from the file
     unsigned char magic[8];
-    if (fread(magic, 1, 8, ifp) != 8 || strncmp((const char*)magic, "Salted__", 8) != 0) {
+    if (fread(magic, 1, 8, ifp) != 8 || strncmp((const char *)magic, "Salted__", 8) != 0) {
         fprintf(stderr, "No salt header found in the file\n");
         fclose(ifp);
         return NULL;/*EXIT_FAILURE*/
@@ -174,10 +173,10 @@ unsigned char* tls_alloc_decrypt_file(const char* input_file, const char* passwo
     printf("\n");
 
     // Derive the key and IV
-    const EVP_CIPHER* cipher = EVP_aes_256_cbc();
-    const EVP_MD* dgst = EVP_sha256();
+    const EVP_CIPHER *cipher = EVP_aes_256_cbc();
+    const EVP_MD *dgst = EVP_sha256();
 
-    if (!EVP_BytesToKey(cipher, dgst, salt, (unsigned char*)password, strlen(password), 1, key, iv)) {
+    if (!EVP_BytesToKey(cipher, dgst, salt, (unsigned char *)password, strlen(password), 1, key, iv)) {
         tls_handleErrors();
         return NULL;
     }
@@ -194,7 +193,7 @@ unsigned char* tls_alloc_decrypt_file(const char* input_file, const char* passwo
         printf("%02x", iv[i]);
     printf("\n");
 
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx) {
         tls_handleErrors();
         return NULL;
@@ -206,7 +205,7 @@ unsigned char* tls_alloc_decrypt_file(const char* input_file, const char* passwo
     }
 
     unsigned char inbuf[BUFFER_SIZE + EVP_MAX_BLOCK_LENGTH];
-    unsigned char* outbuf = NULL;
+    unsigned char *outbuf = NULL;
     int outbuf_len = 0;
     int inlen, outlen;
 
