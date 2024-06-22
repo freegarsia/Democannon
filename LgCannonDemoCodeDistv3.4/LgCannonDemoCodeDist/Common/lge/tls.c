@@ -34,8 +34,8 @@ openssl s_server -cert server-cert.pem -key server-key.pem -CAfile ca-cert.pem -
 openssl s_client -cert client-cert.pem -key client-key.pem -CAfile ca-cert.pem -connect 127.0.0.1:4443
 
 9) encryption of AES-256-CBC
-openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222    
-openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222 
+openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222
+openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222
 ==============================================================================================================*/
 
 // Buffer size for reading file
@@ -44,9 +44,9 @@ openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11
 void tls_init_openssl() {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
-    
+
     ERR_load_crypto_strings();
-    OpenSSL_add_all_algorithms();    
+    OpenSSL_add_all_algorithms();
 }
 
 void tls_handleErrors(void)
@@ -66,17 +66,20 @@ void tls_cleanup_openssl(st_tls* p_this) {
         SSL_shutdown(p_this->ssl);
         SSL_free(p_this->ssl);
         SSL_CTX_free(p_this->ctx);
-        EVP_cleanup();    
+        EVP_cleanup();
         p_this->ssl = 0;
         p_this->ctx = 0;
     }
 }
 
-SSL_CTX* tls_create_context(st_tls* p_this) {
+SSL_CTX* tls_create_context(st_tls* p_this, const bool is_for_server) {
     const SSL_METHOD *method;
     SSL_CTX *ctx;
 
-    method = TLS_client_method();
+    if (is_for_server)
+        method = TLS_server_method();
+    else
+        method = TLS_client_method();
     ctx = SSL_CTX_new(method);
     if (!ctx) {
         perror("Unable to create SSL context");
@@ -88,7 +91,7 @@ SSL_CTX* tls_create_context(st_tls* p_this) {
     return ctx;
 }
 
-void tls_configure_context_file(SSL_CTX *ctx, const char* sz_cert, const char* sz_key, const char* sz_ca_cert) {
+void tls_configure_context_file(SSL_CTX *ctx, const bool is_for_server, const char* sz_cert, const char* sz_key, const char* sz_ca_cert) {
     SSL_CTX_set_ecdh_auto(ctx, 1);
 
     // Set the certificate and key
@@ -108,12 +111,14 @@ void tls_configure_context_file(SSL_CTX *ctx, const char* sz_cert, const char* s
         exit(EXIT_FAILURE);
     }
 
-    // Require server certificate verification
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    // Require client certificate
+    SSL_CTX_set_verify(ctx
+        , (is_for_server)?SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT:SSL_VERIFY_PEER
+        , NULL);
     SSL_CTX_set_verify_depth(ctx, 4);
 }
 
-void tls_configure_context(st_tls* p_this, const unsigned char* cert, const unsigned char* key, const char* sz_ca_cert) {
+void tls_configure_context(st_tls* p_this, const bool is_for_server, const unsigned char* cert, const unsigned char* key, const char* sz_ca_cert) {
     SSL_CTX_set_ecdh_auto(p_this->ctx, 1);
 
     // Load server's certificate and private key from memory
@@ -140,7 +145,9 @@ void tls_configure_context(st_tls* p_this, const unsigned char* cert, const unsi
     }
 
     // Require server certificate verification
-    SSL_CTX_set_verify(p_this->ctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_verify(p_this->ctx
+        , (is_for_server)?SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT:SSL_VERIFY_PEER
+        , NULL);
     SSL_CTX_set_verify_depth(p_this->ctx, 4);
 
     X509_free(certificate);
@@ -152,8 +159,8 @@ void tls_configure_context(st_tls* p_this, const unsigned char* cert, const unsi
 
 // Function to decrypt the file
 /*
-openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222    
-openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222 
+openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222
+openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222
 */
 unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *password, int *decrypted_len) {
     FILE *ifp = fopen(input_file, "rb");
@@ -251,10 +258,14 @@ unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *passwo
 
 
 //#define TEST
+
 #if defined(TEST)
 
 #define KEY_ENCRYPTED
 #define PORT 4443
+#define SERVER
+
+st_tls tls = {.ctx = NULL, .ssl = NULL};
 
 int main(int argc, char **argv) {
 
@@ -265,42 +276,98 @@ int main(int argc, char **argv) {
     }
 
     const char *password = argv[1];
-    char* cert = NULL;
-    char* key = NULL;
-    
+    unsigned char* cert = NULL;
+    unsigned char* key = NULL;
+
     // Initialize OpenSSL
     ERR_load_crypto_strings();
     OpenSSL_add_all_algorithms();
 
     int cert_len = 0;
-    cert = tls_alloc_decrypt_file("client-cert.pem.enc", password, &cert_len);
+    cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
     if (cert == NULL) {
         fprintf(stderr, "Decryption failed.1\n");
-        exit(EXIT_FAILURE);    
+        exit(EXIT_FAILURE);
     }
     cert[cert_len] = 0;
-    
+
     int key_len = 0;
-    key = tls_alloc_decrypt_file("client-key.pem.enc", password, &key_len);
+    key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
     if (cert == NULL) {
         fprintf(stderr, "Decryption failed.2\n");
-        exit(EXIT_FAILURE);   
-    }    
+        exit(EXIT_FAILURE);
+    }
     key[key_len] = 0;
-#endif /*defined(KEY_ENCRYPTED)*/    
-    int sock;
-    struct sockaddr_in addr;
-    SSL_CTX *ctx;
-    SSL *ssl;
-
-    tls_init_openssl();
-    ctx = tls_create_context();
-#if defined(KEY_ENCRYPTED)    
-    tls_configure_context(ctx, cert, key, "ca-cert.pem");
-#else /*defined(KEY_ENCRYPTED)*/
-    tls_configure_context_file(ctx);
 #endif /*defined(KEY_ENCRYPTED)*/
 
+#if defined(SERVER)
+    bool is_for_server = true;
+#else
+    bool is_for_server = false;
+#endif
+
+    tls_init_openssl();
+    tls_create_context(&tls, is_for_server);
+#if defined(KEY_ENCRYPTED)
+    tls_configure_context(&tls, is_for_server, cert, key, "ca-cert.pem");
+#else /*defined(KEY_ENCRYPTED)*/
+    tls_configure_context_file(&tls, is_for_server);
+#endif /*defined(KEY_ENCRYPTED)*/
+
+#if defined(SERVER)
+    int sock;
+    struct sockaddr_in addr;
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("Unable to create socket");
+        exit(EXIT_FAILURE);
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("Unable to bind");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(sock, 1) < 0) {
+        perror("Unable to listen");
+        exit(EXIT_FAILURE);
+    }
+
+    while (1) {
+        struct sockaddr_in addr;
+        uint len = sizeof(addr);
+
+        int client = accept(sock, (struct sockaddr*)&addr, &len);
+        if (client < 0) {
+            perror("Unable to accept");
+            exit(EXIT_FAILURE);
+        }
+        tls_new_set_fd(&tls, client);
+
+        if (SSL_accept(tls.ssl) <= 0) {
+            ERR_print_errors_fp(stderr);
+        } else {
+            char buf[256] = {0};
+            SSL_read(tls.ssl, buf, sizeof(buf));
+            printf("Received: %s\n", buf);
+            SSL_write(tls.ssl, "hello too", strlen("hello too"));
+        }
+
+        SSL_shutdown(tls.ssl);
+        SSL_free(tls.ssl);
+        close(client);
+    }
+
+    close(sock);
+    SSL_CTX_free(tls.ctx);
+    EVP_cleanup();
+#else
+    int sock;
+    struct sockaddr_in addr;
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("Unable to create socket");
@@ -316,26 +383,26 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, sock);
+    tls_new_set_fd(&tls, sock);
 
-    if (SSL_connect(ssl) <= 0) {
+    if (SSL_connect(tls.ssl) <= 0) {
         ERR_print_errors_fp(stderr);
     } else {
-        SSL_write(ssl, "hello", strlen("hello"));
+        SSL_write(tls.ssl, "hello", strlen("hello"));
         char buf[256] = {0};
-        SSL_read(ssl, buf, sizeof(buf));
+        SSL_read(tls.ssl, buf, sizeof(buf));
         printf("Received: %s\n", buf);
     }
     close(sock);
     tls_cleanup_openssl(&tls);
+#endif
 
-#if defined(KEY_ENCRYPTED)        
+#if defined(KEY_ENCRYPTED)
     if (cert != NULL)
         free(cert);
     if (key != NULL)
-        free(key);    
-#endif /*defined(KEY_ENCRYPTED)*/        
+        free(key);
+#endif /*defined(KEY_ENCRYPTED)*/
     return 0;
 }
 

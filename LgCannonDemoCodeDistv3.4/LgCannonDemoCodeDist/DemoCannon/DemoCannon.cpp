@@ -27,12 +27,14 @@
 #if defined(TLS_ENABLE)
 #include <tls.h>
 st_tls tls = {.ctx = NULL, .ssl = NULL};
+int tls_test_server(st_tls* p_this);
 #endif /*TLS_ENABLE*/
 
-//#define USE_TFLITE      1 
+//#define USE_TFLITE      1
 #define USE_IMAGE_MATCH 1
 
 #define PORT            5000
+//#define PORT           4443
 #define PAN_SERVO       1
 #define TILT_SERVO      2
 #define MIN_TILT         (-35.0f)
@@ -74,7 +76,7 @@ typedef struct
  volatile TEngagementState State;
  int                       StableCount;
  float                     LastPan;
- float                     LastTilt;   
+ float                     LastTilt;
  int                       Target;
 } TAutoEngage;
 
@@ -121,7 +123,7 @@ static void   CleanUp(void);
 static void   Control_C_Handler(int s);
 static void   HandleInputChar(Mat &image);
 static void * NetworkInputThread(void *data);
-static void * EngagementThread(void *data); 
+static void * EngagementThread(void *data);
 static int PrintfSend(const char *fmt, ...);
 static bool   GetFrame( Mat &frame);
 static void   CreateNoDataAvalable(void);
@@ -130,15 +132,15 @@ static bool   compare_float(float x, float y, float epsilon = 0.5f);
 static void   ServoAngle(int Num,float &Angle) ;
 
 
-/*************************************** TF LITE START ********************************************************/ 
+/*************************************** TF LITE START ********************************************************/
 #if USE_TFLITE && !USE_IMAGE_MATCH
 static ObjectDetector *detector;
-/*************************************** TF LITE END   ********************************************************/ 
+/*************************************** TF LITE END   ********************************************************/
 #elif USE_IMAGE_MATCH && !USE_TFLITE
-/*************************************** IMAGE_MATCH START *****************************************************/ 
+/*************************************** IMAGE_MATCH START *****************************************************/
 
 
-/*************************************** IMAGE_MATCH END *****************************************************/ 
+/*************************************** IMAGE_MATCH END *****************************************************/
 #endif
 //------------------------------------------------------------------------------------------------
 // static void ReadOffsets
@@ -149,7 +151,7 @@ static void ReadOffsets(void)
    float x,y;
    char xs[100],ys[100];
    int retval=0;
-   
+
    fp = fopen ("Correct.ini", "r");
    retval+=fscanf(fp, "%s %f", xs,&x);
    retval+=fscanf(fp, "%s %f", ys,&y);
@@ -184,7 +186,7 @@ static void WriteOffsets(void)
    rewind(fp);
    fprintf(fp,"xCorrect %f\n", xCorrect);
    fprintf(fp,"yCorrect %f\n", yCorrect);
-      
+
    printf("Wrote Offsets:\n");
    printf("xCorrect= %f\n",xCorrect);
    printf("yCorrect= %f\n",yCorrect);
@@ -210,13 +212,13 @@ static bool compare_float(float x, float y, float epsilon)
 //------------------------------------------------------------------------------------------------
 // static void ServoAngle
 //------------------------------------------------------------------------------------------------
-static void ServoAngle(int Num,float &Angle)     
+static void ServoAngle(int Num,float &Angle)
 {
   pthread_mutex_lock(&I2C_Mutex);
   if (Num==TILT_SERVO)
    {
-     if (Angle< MIN_TILT) Angle=MIN_TILT; 
-     else if (Angle > MAX_TILT) Angle=MAX_TILT; 
+     if (Angle< MIN_TILT) Angle=MIN_TILT;
+     else if (Angle > MAX_TILT) Angle=MAX_TILT;
    }
   else if (Num==PAN_SERVO)
    {
@@ -225,7 +227,7 @@ static void ServoAngle(int Num,float &Angle)
    }
   Servos->angle(Num,Angle);
   pthread_mutex_unlock(&I2C_Mutex);
-} 
+}
 //------------------------------------------------------------------------------------------------
 // END static void ServoAngle
 //------------------------------------------------------------------------------------------------
@@ -288,9 +290,9 @@ static void laser(bool value)
 //------------------------------------------------------------------------------------------------
 static void ProcessTargetEngagements(TAutoEngage *Auto,int width,int height)
 {
- 
+
  bool NewState=false;
-        
+
  switch(Auto->State)
   {
    case NOT_ACTIVE:
@@ -323,7 +325,7 @@ static void ProcessTargetEngagements(TAutoEngage *Auto,int width,int height)
                          TiltError=(DetectedMatches[i].center.y+yCorrect)-height/2;
                          Tilt=Tilt-TiltError/75;
                          ServoAngle(TILT_SERVO, Tilt);
- 
+
                          if ((compare_float(Auto->LastPan,Pan)) && (compare_float(Auto->LastTilt,Tilt)))
                           {
                             Auto->StableCount++;
@@ -337,12 +339,12 @@ static void ProcessTargetEngagements(TAutoEngage *Auto,int width,int height)
                          break;
                         }
                      }
-                  if (Auto->State!=state)  
+                  if (Auto->State!=state)
                      {
                       NewState=true;
                       Auto->State=state;
                      }
-                  if (NewState) 
+                  if (NewState)
                      {
                       if (state==LOOKING_FOR_TARGET)
                         {
@@ -359,39 +361,39 @@ static void ProcessTargetEngagements(TAutoEngage *Auto,int width,int height)
 
                       else if (state==TRACKING_STABLE)
                         {
-                             
-                          PrintfSend("Target Tracking Stable %d",AutoEngage.Target); 
+
+                          PrintfSend("Target Tracking Stable %d",AutoEngage.Target);
                           Auto->State=ENGAGEMENT_IN_PROGRESS;
                           printf("Signaling Engagement\n");
-                          if ((retval = pthread_cond_signal(&Engagement_cv)) != 0) 
+                          if ((retval = pthread_cond_signal(&Engagement_cv)) != 0)
                             {
                              printf("pthread_cond_signal Error\n");
                              exit(0);
                             }
                         }
                      }
-                }    
+                }
                 break;
    case ENGAGEMENT_IN_PROGRESS:
                 {
                 }
-                break;      
+                break;
    case ENGAGEMENT_COMPLETE:
                 {
                  AutoEngage.CurrentIndex++;
-                 if (AutoEngage.CurrentIndex>=AutoEngage.NumberOfTartgets) 
+                 if (AutoEngage.CurrentIndex>=AutoEngage.NumberOfTartgets)
                    {
                     Auto->State=NOT_ACTIVE;
                     SystemState=PREARMED;
                     SendSystemState(SystemState);
                     PrintfSend("Target List Completed");
                    }
-                 else  Auto->State=NEW_TARGET; 
+                 else  Auto->State=NEW_TARGET;
                 }
-                break;  
-    default: 
+                break;
+    default:
              printf("Invaid State\n");
-             break;    
+             break;
  }
   return;
 }
@@ -403,13 +405,13 @@ static void ProcessTargetEngagements(TAutoEngage *Auto,int width,int height)
 //------------------------------------------------------------------------------------------------
 static void CreateNoDataAvalable(void)
 {
-  while (!GetFrame(NoDataAvalable)) printf("blank frame grabbed\n");    
+  while (!GetFrame(NoDataAvalable)) printf("blank frame grabbed\n");
   cv::String Text =format("NO DATA");
 
   int baseline;
   float FontSize=3.0; //12.0;
   int Thinkness=4;
-    
+
   NoDataAvalable.setTo(cv::Scalar(128, 128, 128));
   Size TextSize= cv::getTextSize(Text, cv::FONT_HERSHEY_COMPLEX, FontSize,  Thinkness,&baseline); // Get font size
 
@@ -464,7 +466,7 @@ static bool GetFrame(Mat &frame)
 #endif
 
     flip(frame, frame,-1);       // if running on PI5 flip(-1)=180 degrees
-    
+
     return (true);
 }
 //------------------------------------------------------------------------------------------------
@@ -475,13 +477,13 @@ static bool GetFrame(Mat &frame)
 //------------------------------------------------------------------------------------------------
 static void CloseCamera(void)
 {
- if (capture!=NULL)  
+ if (capture!=NULL)
  {
 #if USE_USB_WEB_CAM
        capture->release();
-#else    
+#else
        capture->stopVideo();
-#endif 
+#endif
        delete capture;
        capture=NULL;
  }
@@ -543,7 +545,7 @@ static bool OLEDInit(void)
     uint8_t rc = 0;
     // open the I2C device node
     rc = ssd1306_init(i2c_node_address);
-    
+
     if (rc != 0)
     {
         printf("no oled attached to /dev/i2c-%d\n", i2c_node_address);
@@ -565,7 +567,7 @@ static bool OLEDInit(void)
   ssd1306_oled_set_rotate(0);
   ssd1306_oled_set_XY(0, 0);
   ssd1306_oled_write_line(OLED_Font, (char *) "READY");
-  return(true); 
+  return(true);
 }
 //------------------------------------------------------------------------------------------------
 // END static bool OLEDInit
@@ -590,7 +592,7 @@ static void OLED_UpdateStatus(void)
     if (SystemStateBase!=LastSystemStateBase)
       {
        LastSystemStateBase=SystemStateBase;
-       ssd1306_oled_clear_line(0);  
+       ssd1306_oled_clear_line(0);
        ssd1306_oled_set_XY(0, 0);
        if  (SystemStateBase==UNKNOWN)  strcpy(Status,"Unknown");
        else if  (SystemStateBase==SAFE)  strcpy(Status,"SAFE");
@@ -603,7 +605,7 @@ static void OLED_UpdateStatus(void)
 
    if((SystemState & LASER_ON)!=(LastSystemState & LASER_ON)||(LastSystemState==UNKNOWN))
     {
-     ssd1306_oled_clear_line(1); 
+     ssd1306_oled_clear_line(1);
      ssd1306_oled_set_XY(0, 1);
      if (SystemState & LASER_ON ) strcpy(Status,"LASER-ON");
      else strcpy(Status,"LASER-OFF");
@@ -611,7 +613,7 @@ static void OLED_UpdateStatus(void)
     }
    if((SystemState & FIRING)!=(LastSystemState & FIRING)||(LastSystemState==UNKNOWN))
    {
-     ssd1306_oled_clear_line(2); 
+     ssd1306_oled_clear_line(2);
      ssd1306_oled_set_XY(0, 2);
      if (SystemState & FIRING ) strcpy(Status,"FIRING-TRUE");
      else strcpy(Status,"FIRING-FALSE");
@@ -651,7 +653,7 @@ static void DrawCrosshair(Mat &img, Point correct, const Scalar &color)
 //------------------------------------------------------------------------------------------------
 int main(int argc, const char** argv)
 {
-  Mat                              Frame,ResizedFrame;      // camera image in Mat format 
+  Mat                              Frame,ResizedFrame;      // camera image in Mat format
   float                            avfps=0.0,FPS[16]={0.0,0.0,0.0,0.0,
                                                       0.0,0.0,0.0,0.0,
                                                       0.0,0.0,0.0,0.0,
@@ -673,29 +675,31 @@ int main(int argc, const char** argv)
     int cert_len = 0;
     int key_len = 0;
 
-    tls_init_openssl();    
+    tls_init_openssl();
     cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
     if (cert == NULL) {
       fprintf(stderr, "Decryption failed.1\n");
-      exit(EXIT_FAILURE);    
+      exit(EXIT_FAILURE);
     }
     cert[cert_len] = 0;
 
     key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
     if (cert == NULL) {
       fprintf(stderr, "Decryption failed.2\n");
-      exit(EXIT_FAILURE);   
-    }    
+      exit(EXIT_FAILURE);
+    }
     key[key_len] = 0;
 
-    tls_create_context(&tls);  
-    tls_configure_context(&tls, cert, key, "ca-cert.pem");
+    tls_create_context(&tls, true);
+    tls_configure_context(&tls, true, cert, key, "ca-cert.pem");
+
+    //tls_test_server(&tls);
 #endif /*TLS_ENABLE*/
- 
+
   ReadOffsets();
 
   for (i = 0; i < 16; i++) FPS[i] = 0.0;
-    
+
   AutoEngage.State=NOT_ACTIVE;
   AutoEngage.HaveFiringOrder=false;
   AutoEngage.NumberOfTartgets=0;
@@ -710,11 +714,11 @@ int main(int argc, const char** argv)
   pthread_mutexattr_settype(&Engmnt_MutexAttr, PTHREAD_MUTEX_ERRORCHECK);
 
   if (pthread_mutex_init(&TCP_Mutex, &TCP_MutexAttr)!=0) return -1;
-  if (pthread_mutex_init(&GPIO_Mutex, &GPIO_MutexAttr)!=0) return -1; 
-  if (pthread_mutex_init(&I2C_Mutex, &I2C_MutexAttr)!=0) return -1; 
-  if (pthread_mutex_init(&Engmnt_Mutex, &Engmnt_MutexAttr)!=0) return -1; 
+  if (pthread_mutex_init(&GPIO_Mutex, &GPIO_MutexAttr)!=0) return -1;
+  if (pthread_mutex_init(&I2C_Mutex, &I2C_MutexAttr)!=0) return -1;
+  if (pthread_mutex_init(&Engmnt_Mutex, &Engmnt_MutexAttr)!=0) return -1;
 
-  HaveOLED=OLEDInit();   
+  HaveOLED=OLEDInit();
 
   printf("OpenCV: Version %s\n",cv::getVersionString().c_str());
 
@@ -730,7 +734,7 @@ int main(int argc, const char** argv)
  DetectedMatches = new  TDetectedMatches[MAX_DETECTED_MATCHES];
 
 
- if (LoadRefImages(symbols) == -1) 
+ if (LoadRefImages(symbols) == -1)
    {
     printf("Error reading reference symbols\n");
     return -1;
@@ -748,7 +752,7 @@ int main(int argc, const char** argv)
    laser(false);
    fire(false);
    calibrate(false);
-   
+
    OpenServos();
    ServoAngle(PAN_SERVO, Pan);
    ServoAngle(TILT_SERVO, Tilt);
@@ -772,7 +776,7 @@ int main(int argc, const char** argv)
       return(-1);
      }
   else printf("Opened Camera\n");
-  
+
   CreateNoDataAvalable();
 
 #if defined(TLS_ENABLE)
@@ -793,7 +797,7 @@ int main(int argc, const char** argv)
   do
    {
     Tbegin = chrono::steady_clock::now();
-    
+
     if (!GetFrame(Frame))
         {
          printf("ERROR! blank frame grabbed\n");
@@ -803,8 +807,8 @@ int main(int argc, const char** argv)
     HandleInputChar(Frame);                           // Handle Keyboard Input
 #if USE_TFLITE
 
-    DetectResult* res = detector->detect(Frame); 
-    for (i = 0; i < detector->DETECT_NUM; ++i) 
+    DetectResult* res = detector->detect(Frame);
+    for (i = 0; i < detector->DETECT_NUM; ++i)
         {
 	  int labelnum = res[i].label;
 	  float score = res[i].score;
@@ -813,12 +817,12 @@ int main(int argc, const char** argv)
 	  float ymin = res[i].ymin;
 	  float ymax = res[i].ymax;
           int baseline=0;
-                
+
           if (score<0.10) continue;
-                    
+
           cv::rectangle(Frame, Point(xmin,ymin), Point(xmax,ymax), Scalar(10, 255, 0), 2);
           cv::String label =to_string(labelnum) + ": " + to_string(int(score*100))+ "%";
-               
+
           Size labelSize= cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2,&baseline); // Get font size
           int label_ymin = std::max((int)ymin, (int)(labelSize.height + 10)); // Make sure not to draw label too close to top of window
           rectangle(Frame, Point(xmin, label_ymin-labelSize.height-10), Point(xmin+labelSize.width, label_ymin+baseline-10), Scalar(255, 255, 255), cv::FILLED); // Draw white box to put label text in
@@ -836,7 +840,7 @@ int main(int argc, const char** argv)
 #define FPS_YPOS 20
     cv::String FPS_label =format("FPS %0.2f",avfps / 16);
     int FPS_baseline=0;
-                      
+
     Size FPS_labelSize= cv::getTextSize(FPS_label, cv::FONT_HERSHEY_SIMPLEX, 0.7, 2,&FPS_baseline); // Get font size
     int FPS_label_ymin = std::max((int)FPS_YPOS, (int)(FPS_labelSize.height + 10)); // Make sure not to draw label too close to top of window
     rectangle(Frame, Point(FPS_XPOS, FPS_label_ymin-FPS_labelSize.height-10), Point(FPS_XPOS+FPS_labelSize.width, FPS_label_ymin+FPS_baseline-10), Scalar(255, 255, 255), cv::FILLED); // Draw white box to put label text in
@@ -846,20 +850,20 @@ int main(int argc, const char** argv)
       {
         Frame=NoDataAvalable.clone();
         resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
-      } 
+      }
    else
      {
       resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
       DrawCrosshair(ResizedFrame,Point((int)xCorrect,(int)yCorrect),Scalar(0, 0, 255)); //BGR
      }
 
-#if defined(TLS_ENABLE)   
+#if defined(TLS_ENABLE)
     if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls)<0))  break;
-#else /*TLS_ENABLE*/  
+#else /*TLS_ENABLE*/
     if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame)<0))  break;
-#endif /*TLS_ENABLE*/  
+#endif /*TLS_ENABLE*/
 
-   
+
     Tend = chrono::steady_clock::now();
     avfps = chrono::duration_cast <chrono::milliseconds> (Tend - Tbegin).count();
     if (avfps > 0.0) FPS[((Fcnt++) & 0x0F)] = 1000.0 / avfps;
@@ -868,9 +872,9 @@ int main(int argc, const char** argv)
 
   printf("Main Thread Exiting\n");
   CleanUp();
-#if defined(TLS_ENABLE)  
+#if defined(TLS_ENABLE)
   tls_cleanup_openssl(&tls);
-#endif /*TLS_ENABLE*/  
+#endif /*TLS_ENABLE*/
   return 0;
 }
 //------------------------------------------------------------------------------------------------
@@ -879,12 +883,12 @@ int main(int argc, const char** argv)
 //------------------------------------------------------------------------------------------------
 // static void * EngagementThread
 //------------------------------------------------------------------------------------------------
-static void * EngagementThread(void *data) 
+static void * EngagementThread(void *data)
 {
   int ret;
   while (1) {
     if ((ret = pthread_mutex_lock(&Engmnt_Mutex)) != 0) {
-      
+
       printf("Engmnt_Mutex ERROR\n");
       break;
     }
@@ -909,7 +913,7 @@ static void * EngagementThread(void *data)
     PrintfSend("Engaged Target %d",AutoEngage.Target);
     AutoEngage.State=ENGAGEMENT_COMPLETE;
 
-    if ((ret = pthread_mutex_unlock(&Engmnt_Mutex)) != 0) 
+    if ((ret = pthread_mutex_unlock(&Engmnt_Mutex)) != 0)
     {
         printf("Engagement pthread_cond_wait ERROR\n");
        break;
@@ -924,12 +928,12 @@ static void * EngagementThread(void *data)
 //------------------------------------------------------------------------------------------------
 // static int PrintfSend
 //------------------------------------------------------------------------------------------------
-static int PrintfSend(const char *fmt, ...) 
+static int PrintfSend(const char *fmt, ...)
 {
     char Buffer[2048];
     int  BytesWritten;
     int  retval;
-    pthread_mutex_lock(&TCP_Mutex); 
+    pthread_mutex_lock(&TCP_Mutex);
     va_list args;
     va_start(args, fmt);
     BytesWritten=vsprintf(Buffer,fmt, args);
@@ -940,24 +944,24 @@ static int PrintfSend(const char *fmt, ...)
        BytesWritten++;
        MsgHdr.Len=htonl(BytesWritten);
        MsgHdr.Type=htonl(MT_TEXT);
-#if defined(TLS_ENABLE)       
-       if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader), &tls)!=sizeof(TMesssageHeader)) 
+#if defined(TLS_ENABLE)
+       if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader), &tls)!=sizeof(TMesssageHeader))
 #else /*TLS_ENABLE*/
-        if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) 
+        if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr, sizeof(TMesssageHeader))!=sizeof(TMesssageHeader))
 #endif /*TLS_ENABLE*/
            {
             pthread_mutex_unlock(&TCP_Mutex);
             return (-1);
            }
-#if defined(TLS_ENABLE)       
+#if defined(TLS_ENABLE)
         retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)Buffer,BytesWritten, &tls);
 #else /*TLS_ENABLE*/
        retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)Buffer,BytesWritten);
-#endif /*TLS_ENABLE*/       
+#endif /*TLS_ENABLE*/
        pthread_mutex_unlock(&TCP_Mutex);
        return(retval);
       }
-    else 
+    else
      {
       pthread_mutex_unlock(&TCP_Mutex);
       return(BytesWritten);
@@ -978,14 +982,14 @@ static int SendSystemState(SystemState_t State)
  StateMsg.Hdr.Len=htonl(sizeof(StateMsg.State));
  StateMsg.Hdr.Type=htonl(MT_STATE);
  OLED_UpdateStatus();
-#if defined(TLS_ENABLE)   
+#if defined(TLS_ENABLE)
  retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState), &tls);
 #else /*TLS_ENABLE*/
     retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState));
 #endif /*TLS_ENABLE*/
  pthread_mutex_unlock(&TCP_Mutex);
  return(retval);
-} 
+}
 //------------------------------------------------------------------------------------------------
 // END static int SendSystemState
 //------------------------------------------------------------------------------------------------
@@ -999,13 +1003,13 @@ static void ProcessPreArm(char * Code)
  if (SystemState==SAFE)
   {
     if ((Code[sizeof(Decode)]==0) && (strlen(Code)==sizeof(Decode)))
-      { 
+      {
         for (int i=0;i<sizeof(Decode);i++) Code[i]^=Decode[i];
         if (strcmp((const char*)Code,"PREARMED")==0)
           {
             SystemState=PREARMED;
             SendSystemState(SystemState);
-          } 
+          }
       }
   }
 }
@@ -1016,7 +1020,7 @@ static void ProcessPreArm(char * Code)
 // static void ProcessStateChangeRequest
 //------------------------------------------------------------------------------------------------
 static void ProcessStateChangeRequest(SystemState_t state)
-{  
+{
  static bool CalibrateWasOn=false;
  switch(state&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)
  {
@@ -1032,8 +1036,8 @@ static void ProcessStateChangeRequest(SystemState_t state)
             }
             break;
   case PREARMED:
-            { 
-              if (((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)==ENGAGE_AUTO) || 
+            {
+              if (((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)==ENGAGE_AUTO) ||
                   ((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)==ARMED_MANUAL))
                 {
                   laser(false);
@@ -1054,13 +1058,13 @@ static void ProcessStateChangeRequest(SystemState_t state)
             {
               if ((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=PREARMED)
               {
-               PrintfSend("Invalid State request to Auto %d\n",SystemState); 
+               PrintfSend("Invalid State request to Auto %d\n",SystemState);
               }
              else if (!AutoEngage.HaveFiringOrder)
               {
                PrintfSend("No Firing Order List");
               }
-             else 
+             else
               {
                 laser(false);
                 calibrate(false);
@@ -1072,10 +1076,10 @@ static void ProcessStateChangeRequest(SystemState_t state)
             break;
   case ARMED_MANUAL:
             {
-              if (((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=PREARMED) && 
-                  ((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL)) 
+              if (((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=PREARMED) &&
+                  ((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL))
               {
-               PrintfSend("Invalid State request to Auto %d\n",SystemState); 
+               PrintfSend("Invalid State request to Auto %d\n",SystemState);
               }
              else if ((SystemState&CLEAR_LASER_FIRING_ARMED_CALIB_MASK)==PREARMED)
               {
@@ -1099,15 +1103,15 @@ static void ProcessStateChangeRequest(SystemState_t state)
  if (SystemState & LASER_ON)  laser(true);
  else laser(false);
 
- if (SystemState & CALIB_ON)  
+ if (SystemState & CALIB_ON)
     {
      calibrate(true);
      CalibrateWasOn=true;
     }
- else 
+ else
     {
      calibrate(false);
-     if (CalibrateWasOn) 
+     if (CalibrateWasOn)
         {
          CalibrateWasOn=false;
          WriteOffsets();
@@ -1125,16 +1129,16 @@ static void ProcessStateChangeRequest(SystemState_t state)
 static void ProcessFiringOrder(char * FiringOrder)
 {
   int len=strlen(FiringOrder);
-  
+
   AutoEngage.State=NOT_ACTIVE;
   AutoEngage.HaveFiringOrder=false;
   AutoEngage.NumberOfTartgets=0;
   AutoEngage.Target=0;
 
-  if (len>10) 
+  if (len>10)
      {
       printf("Firing order error\n");
-      return; 
+      return;
      }
   for (int i=0;i<len;i++)
     {
@@ -1147,8 +1151,8 @@ static void ProcessFiringOrder(char * FiringOrder)
      PrintfSend("Empty Firing List");
      return;
     }
-  AutoEngage.NumberOfTartgets=len; 
-#if 0  
+  AutoEngage.NumberOfTartgets=len;
+#if 0
   printf("Firing order:\n");
   for (int i=0;i<len;i++) printf("%d\n",AutoEngage.FiringOrder[i]);
   printf("\n\n");
@@ -1167,12 +1171,12 @@ static void ProcessCommands(unsigned char cmd)
     {
       printf("received Commands outside of Pre-Arm or Armed Manual State %x \n",cmd);
       return;
-    } 
+    }
  if (((cmd==FIRE_START) || (cmd==FIRE_STOP)) && ((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL))
     {
       printf("received Fire Commands outside of Armed Manual State %x \n",cmd);
       return;
-    } 
+    }
 
 
       switch(cmd)
@@ -1192,20 +1196,20 @@ static void ProcessCommands(unsigned char cmd)
          case PAN_UP_START:
               RunCmds|=PAN_UP_START;
               RunCmds&=PAN_DOWN_STOP;
-              Tilt+=INC; 
+              Tilt+=INC;
               ServoAngle(TILT_SERVO, Tilt);
               break;
          case PAN_DOWN_START:
               RunCmds|=PAN_DOWN_START;
               RunCmds&=PAN_UP_STOP;
-              Tilt-=INC; 
+              Tilt-=INC;
               ServoAngle(TILT_SERVO, Tilt);
               break;
          case FIRE_START:
               RunCmds|=FIRE_START;
               fire(true);
               SendSystemState(SystemState);
-              break;   
+              break;
          case PAN_LEFT_STOP:
               RunCmds&=PAN_LEFT_STOP;
               break;
@@ -1218,7 +1222,7 @@ static void ProcessCommands(unsigned char cmd)
          case PAN_DOWN_STOP:
               RunCmds&=PAN_DOWN_STOP;
               break;
-         case FIRE_STOP: 
+         case FIRE_STOP:
               RunCmds&=FIRE_STOP;
               fire(false);
               SendSystemState(SystemState);
@@ -1243,7 +1247,7 @@ static void ProcessCalibCommands(unsigned char cmd)
     {
       printf("received Commands outside of Armed Manual State %x \n",cmd);
       return;
-    } 
+    }
 
       switch(cmd)
         {
@@ -1278,19 +1282,19 @@ static void *NetworkInputThread(void *data)
  unsigned char Buffer[512];
  TMesssageHeader *MsgHdr;
  int fd=TcpConnectedPort->ConnectedFd,retval;
- 
+
  SendSystemState(SystemState);
- #if defined(TLS_ENABLE) 
+ #if defined(TLS_ENABLE)
     st_tls* p_tls = (st_tls*)data;
-#endif /*TLS_ENABLE*/     
-    
+#endif /*TLS_ENABLE*/
+
  while (1)
  {
-#if defined(TLS_ENABLE) 
-    if ((retval=SSL_read(p_tls->ssl, &Buffer, sizeof(TMesssageHeader))) != sizeof(TMesssageHeader)) 
+#if defined(TLS_ENABLE)
+    if ((retval=SSL_read(p_tls->ssl, &Buffer, sizeof(TMesssageHeader))) != sizeof(TMesssageHeader))
 #else /*TLS_ENABLE*/
-   if ((retval=recv(fd, &Buffer, sizeof(TMesssageHeader),0)) != sizeof(TMesssageHeader)) 
-#endif /*TLS_ENABLE*/    
+   if ((retval=recv(fd, &Buffer, sizeof(TMesssageHeader),0)) != sizeof(TMesssageHeader))
+#endif /*TLS_ENABLE*/
      {
       if (retval==0) printf("Client Disconnnected\n");
       else printf("Connecton Lost %s\n", strerror(errno));
@@ -1307,10 +1311,10 @@ static void *NetworkInputThread(void *data)
      }
 
 #if defined(TLS_ENABLE)
-       if ((retval=SSL_read(p_tls->ssl, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len)) !=  MsgHdr->Len) 
+       if ((retval=SSL_read(p_tls->ssl, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len)) !=  MsgHdr->Len)
 #else /*TLS_ENABLE*/
-         if ((retval=recv(fd, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len,0)) !=  MsgHdr->Len) 
-#endif /*TLS_ENABLE*/    
+         if ((retval=recv(fd, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len,0)) !=  MsgHdr->Len)
+#endif /*TLS_ENABLE*/
      {
       if (retval==0) printf("Client Disconnnected\n");
       else printf("Connecton Lost %s\n", strerror(errno));
@@ -1319,32 +1323,32 @@ static void *NetworkInputThread(void *data)
 
    switch(MsgHdr->Type)
     {
-      case MT_COMMANDS: 
+      case MT_COMMANDS:
       {
        TMesssageCommands *msgCmds=(TMesssageCommands *)Buffer;
        ProcessCommands(msgCmds->Commands);
       }
       break;
-      case MT_CALIB_COMMANDS: 
+      case MT_CALIB_COMMANDS:
       {
        TMesssageCalibCommands *msgCmds=(TMesssageCalibCommands *)Buffer;
        ProcessCalibCommands(msgCmds->Commands);
       }
       break;
 
-      case MT_TARGET_SEQUENCE: 
+      case MT_TARGET_SEQUENCE:
       {
        TMesssageTargetOrder *msgTargetOrder=(TMesssageTargetOrder *)Buffer;
        ProcessFiringOrder(msgTargetOrder->FiringOrder);
       }
       break;
-      case MT_PREARM: 
+      case MT_PREARM:
       {
        TMesssagePreArm *msgPreArm=(TMesssagePreArm *)Buffer;
        ProcessPreArm(msgPreArm->Code);
       }
       break;
-      case MT_STATE_CHANGE_REQ: 
+      case MT_STATE_CHANGE_REQ:
       {
        TMesssageChangeStateRequest *msgChangeStateRequest=(TMesssageChangeStateRequest *)Buffer;
        msgChangeStateRequest->State=(SystemState_t)ntohl(msgChangeStateRequest->State);
@@ -1355,7 +1359,7 @@ static void *NetworkInputThread(void *data)
 
       default:
        printf("Invalid Message Type\n");
-      break; 
+      break;
     }
   }
    isConnected=false;
@@ -1367,17 +1371,17 @@ static void *NetworkInputThread(void *data)
 // END static void *NetworkInputThread
 //------------------------------------------------------------------------------------------------
 //----------------------------------------------------------------
-// Setup_Control_C_Signal_Handler_And_Keyboard_No_Enter - This 
+// Setup_Control_C_Signal_Handler_And_Keyboard_No_Enter - This
 // sets uo the Control-c Handler and put the keyboard in a mode
 // where it will not
 // 1. echo input
-// 2. need enter hit to get a character 
+// 2. need enter hit to get a character
 // 3. block waiting for input
 //-----------------------------------------------------------------
 static void Setup_Control_C_Signal_Handler_And_Keyboard_No_Enter(void)
 {
  struct sigaction sigIntHandler;
- sigIntHandler.sa_handler = Control_C_Handler; // Setup control-c callback 
+ sigIntHandler.sa_handler = Control_C_Handler; // Setup control-c callback
  sigemptyset(&sigIntHandler.sa_mask);
  sigIntHandler.sa_flags = 0;
  sigaction(SIGINT, &sigIntHandler, NULL);
@@ -1394,49 +1398,49 @@ static void CleanUp(void)
 {
  void *res;
  int s;
- 
+
 RestoreKeyboard();                // restore Keyboard
  if (NetworkThreadID!=-1)
   {
    //printf("Cancel Network Thread\n");
    s = pthread_cancel(NetworkThreadID);
    if (s!=0)  printf("Network Thread Cancel Failure\n");
- 
-   //printf("Network Thread Join\n"); 
+
+   //printf("Network Thread Join\n");
    s = pthread_join(NetworkThreadID, &res);
-   if (s != 0)   printf("Network Thread Join Failure\n"); 
+   if (s != 0)   printf("Network Thread Join Failure\n");
 
    if (res == PTHREAD_CANCELED)
-       printf("Network Thread canceled\n"); 
+       printf("Network Thread canceled\n");
    else
-       printf("Network Thread was not canceled\n"); 
+       printf("Network Thread was not canceled\n");
  }
  if (EngagementThreadID!=-1)
   {
    //printf("Cancel Engagement Thread\n");
    s = pthread_cancel(EngagementThreadID);
    if (s!=0)  printf("Engagement Thread Cancel Failure\n");
- 
-   //printf("Engagement Thread Join\n"); 
+
+   //printf("Engagement Thread Join\n");
    s = pthread_join(EngagementThreadID, &res);
-   if (s != 0)   printf("Engagement  Thread Join Failure\n"); 
+   if (s != 0)   printf("Engagement  Thread Join Failure\n");
 
    if (res == PTHREAD_CANCELED)
-       printf("Engagement Thread canceled\n"); 
+       printf("Engagement Thread canceled\n");
    else
-       printf("Engagement Thread was not canceled\n"); 
+       printf("Engagement Thread was not canceled\n");
  }
 
  CloseCamera();
  CloseServos();
- 
+
  laser(false);
  fire(false);
  calibrate(false);
  CloseGPIO();
 
  CloseTcpConnectedPort(&TcpConnectedPort); // Close network port;
- 
+
  if (HaveOLED) ssd1306_end();
  printf("CleanUp Complete\n");
 }
@@ -1465,7 +1469,7 @@ static void HandleInputChar( Mat &frame)
  int ch;
  static unsigned int ImageCount=0;
 
-  if ((ch=getchar())!=EOF) 
+  if ((ch=getchar())!=EOF)
   {
    if  (ch=='s')
     {
@@ -1478,6 +1482,65 @@ static void HandleInputChar( Mat &frame)
 
   }
 }
+
+int tls_test_server(st_tls* p_this) {
+    int sock;
+    struct sockaddr_in addr;
+
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("Unable to create socket");
+        exit(EXIT_FAILURE);
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("Unable to bind");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(sock, 1) < 0) {
+        perror("Unable to listen");
+        exit(EXIT_FAILURE);
+    }
+
+    while (1) {
+        struct sockaddr_in addr;
+        uint len = sizeof(addr);
+        SSL *ssl;
+
+        int client = accept(sock, (struct sockaddr*)&addr, &len);
+        if (client < 0) {
+            perror("Unable to accept");
+            exit(EXIT_FAILURE);
+        }
+
+        p_this->ssl = SSL_new(p_this->ctx);
+        SSL_set_fd(p_this->ssl, client);
+
+        if (SSL_accept(p_this->ssl) <= 0) {
+            ERR_print_errors_fp(stderr);
+        } else {
+            char buf[256] = {0};
+            SSL_read(p_this->ssl, buf, sizeof(buf));
+            printf("Received: %s\n", buf);
+            SSL_write(p_this->ssl, "hello too", strlen("hello too"));
+        }
+
+        SSL_shutdown(p_this->ssl);
+        SSL_free(p_this->ssl);
+        close(client);
+    }
+
+    close(sock);
+    SSL_CTX_free(p_this->ctx);
+    EVP_cleanup();
+    return 0;
+}
+
 //-----------------------------------------------------------------
 // END HandleInputChar
 //-----------------------------------------------------------------
