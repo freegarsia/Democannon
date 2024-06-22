@@ -1,12 +1,9 @@
 # Democannon
-
-
-## Overview
+A Project for LG24Security Edu.
 
 ## Instructions
 ### Prerequisites
-* install Crypto++ via vcpkg
-1. install vcpkg
+1. instdall vcpkg for Visual Studio package management
   1) git clone https://github.com/microsoft/vcpkg.git
   2) cd vcpkg
   3) bootstrap-vcpkg.bat
@@ -17,13 +14,19 @@
 
 ### General Procedure
 #### I. Setup
-1. install openCV
-2. install vcpkg
-  1) vcpkg search cryptopp
-  2) vcpkg install cryptopp
-  3) vcpkg integrate install
+1. install packageas and librarys FOR Client
+1) install OpenCV :
+2) install Visual Studio packages : Cryptopp, spdlog, openssl
+  ```How to install
+  $ vcpkg search cryptopp
+  $ vcpkg install cryptopp
+  $ vcpkg integrate install
+  ```
 
 #### II. How to build
+1. How to compile for Client
+   -> nothing special
+2. How to compile for Server
 
 #### III. How to run
 

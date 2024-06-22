@@ -4,6 +4,10 @@
 #include <iostream>
 #include <stdio.h>
 
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+
 #if 0
 //-----------------------------------------------------------------
 // ReadDataTcp - Reads the specified amount TCP data 
@@ -36,7 +40,13 @@ int ReadDataTcp(SOCKET socket, unsigned char* data, int length)
 //-----------------------------------------------------------------
 int ReadDataTcpNoBlock(SOCKET socket, unsigned char* data, int length)
 {
+
   return(recv(socket, (char*)data, length, 0));
+}
+
+int ReadDataTLSNoBlock(SSL* ssl, unsigned char* data, int length)
+{
+    return (SSL_read(ssl, data, sizeof(data)));
 }
 //-----------------------------------------------------------------
 // END Reads Available TCP data
@@ -74,6 +84,14 @@ int WriteDataTcp(SOCKET socket, unsigned char* data, int length)
 //-----------------------------------------------------------------
 // END WriteDataTcp
 //-----------------------------------------------------------------
+
+int WriteDataTLS(SSL* ssl, unsigned char* message, int length)
+{
+    int len = sizeof(message);
+    SSL_write(ssl, message, length);
+    return (length);
+}
+
 //-----------------------------------------------------------------
 // END of File
 //-----------------------------------------------------------------

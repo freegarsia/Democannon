@@ -12,6 +12,7 @@
 #include "LgClientDisplay.h"
 #include "TcpSendRecv.h"
 #include "DisplayImage.h"
+#include "tls.h"
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -22,8 +23,8 @@ static  std::vector<uchar> sendbuff;//buffer for coding
 static HANDLE hClientEvent = INVALID_HANDLE_VALUE;
 static HANDLE hEndClientEvent = INVALID_HANDLE_VALUE;
 static SOCKET Client = INVALID_SOCKET;
-static SSL* sslClient = NULL;
-static SSL_CTX* sslCtx = NULL;
+static SSL* ssl = NULL;
+static SSL_CTX* ctx = NULL;
 
 static cv::Mat ImageIn;
 static DWORD ThreadClientID;
@@ -68,11 +69,22 @@ bool SendCodeToSever(unsigned char Code)
         MsgCmd.Hdr.Len = htonl(sizeof(unsigned char));
         MsgCmd.Hdr.Type = htonl(MT_COMMANDS);
         MsgCmd.Commands = Code;
-        if (WriteDataTcp(Client, (unsigned char *)&MsgCmd, msglen)== msglen)
+        //if (WriteDataTcp(Client, (unsigned char *)&MsgCmd, msglen)== msglen)
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgCmd, msglen) == msglen)
         {
             return true;
         }
 
+    }
+    return false;
+}
+
+bool SendPasswordToServer(const char* msg)
+{
+    if (IsClientConnected())
+    {
+        SSL_write(ssl, msg, strlen(msg));
+        return true;
     }
     return false;
 }
@@ -87,6 +99,7 @@ bool SendCalibToSever(unsigned char Code)
         MsgCmd.Hdr.Len = htonl(sizeof(unsigned char));
         MsgCmd.Hdr.Type = htonl(MT_CALIB_COMMANDS);
         MsgCmd.Commands = Code;
+
         if (WriteDataTcp(Client, (unsigned char*)&MsgCmd, msglen) == msglen)
         {
             return true;
@@ -105,7 +118,8 @@ bool SendTargetOrderToSever(char* TargetOrder)
         MsgTargetOrder.Hdr.Len = htonl((int)strlen((const char*)TargetOrder)+1);
         MsgTargetOrder.Hdr.Type = htonl(MT_TARGET_SEQUENCE);
         strcpy_s((char*)MsgTargetOrder.FiringOrder,sizeof(MsgTargetOrder.FiringOrder),TargetOrder);
-        if (WriteDataTcp(Client, (unsigned char*)&MsgTargetOrder, msglen) == msglen)
+        /*if (WriteDataTcp(Client, (unsigned char*)&MsgTargetOrder, msglen) == msglen)*/
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgTargetOrder, msglen) == msglen)
         {
             return true;
         }
@@ -141,7 +155,8 @@ bool SendStateChangeRequestToSever(SystemState_t State)
         MsgChangeStateRequest.Hdr.Len = htonl(sizeof(MsgChangeStateRequest.State));
         MsgChangeStateRequest.Hdr.Type = htonl(MT_STATE_CHANGE_REQ);
         MsgChangeStateRequest.State = (SystemState_t)htonl(State);
-        if (WriteDataTcp(Client, (unsigned char*)&MsgChangeStateRequest, msglen) == msglen)
+        //if (WriteDataTcp(Client, (unsigned char*)&MsgChangeStateRequest, msglen) == msglen)
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgChangeStateRequest, msglen) == msglen)
         {
             return true;
         }
@@ -150,28 +165,16 @@ bool SendStateChangeRequestToSever(SystemState_t State)
     return false;
 }
 
-void initialize_openssl() {
-    SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
-}
-
-void cleanup_openssl() {
-    EVP_cleanup();
-}
-
-SSL_CTX* create_context() {
-    const SSL_METHOD* method;
-    SSL_CTX* ctx;
-
-    method = SSLv23_client_method();
-    ctx = SSL_CTX_new(method);
-    if (!ctx) {
-        perror("Unable to create SSL context");
-        ERR_print_errors_fp(stderr);
+void ConfigureContext(SSL_CTX* ctx) {
+    // 클라이언트 인증서를 설정합니다.
+    if (SSL_CTX_use_certificate_file(ctx, "C:/keys/client-cert.pem", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stdout);
         exit(EXIT_FAILURE);
     }
-
-    return ctx;
+    if (SSL_CTX_use_PrivateKey_file(ctx, "C:/keys/client-key.pem", SSL_FILETYPE_PEM) <= 0) {
+        ERR_print_errors_fp(stdout);
+        exit(EXIT_FAILURE);
+    }
 }
 
 bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
@@ -180,6 +183,41 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     struct addrinfo   hints;
     struct addrinfo* result = NULL;
     char remoteportno[128];
+    struct sockaddr_in addr;
+
+    ERR_load_crypto_strings();
+    OpenSSL_add_all_algorithms();
+
+    tls_init_openssl();
+    ctx = tls_create_context();
+    ConfigureContext(ctx);
+
+    Client = socket(AF_INET, SOCK_STREAM, 0);
+    if (Client < 0) {
+        perror("Unable to create socket");
+        exit(EXIT_FAILURE);
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(4443);
+    inet_pton(AF_INET, "localhost", &addr.sin_addr);
+
+    if (connect(Client, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("Unable to connect");
+        exit(EXIT_FAILURE);
+        return false;
+    }
+
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, Client);
+
+    if (SSL_connect(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
+
+
+
 
     sprintf_s(remoteportno,sizeof(remoteportno), "%d", remoteport);
 
@@ -188,7 +226,7 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
+    /*iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
     if (iResult != 0)
     {
         std::cout << "getaddrinfo: Failed" << std::endl;
@@ -198,46 +236,39 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     {
         std::cout << "getaddrinfo: Failed" << std::endl;
         return false;
-    }
+    }*/
 
-    if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
-    {
-        freeaddrinfo(result);
-        std::cout << "video client socket() failed with error "<< WSAGetLastError() << std::endl;
-        return false;
-    }
+    //if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
+    //{
+    //    freeaddrinfo(result);
+    //    std::cout << "video client socket() failed with error "<< WSAGetLastError() << std::endl;
+    //    return false;
+    //}
 
-    //----------------------
-    // Connect to server.
-    iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
-    freeaddrinfo(result);
-    if (iResult == SOCKET_ERROR) {
-        std::cout << "connect function failed with error : "<< WSAGetLastError() << std::endl;
-        iResult = closesocket(Client);
-        Client = INVALID_SOCKET;
-        if (iResult == SOCKET_ERROR)
-            std::cout << "closesocket function failed with error :"<< WSAGetLastError() << std::endl;
-        return false;
-    }
+    ////----------------------
+    //// Connect to server.
+    //iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
+    //freeaddrinfo(result);
+    //if (iResult == SOCKET_ERROR) {
+    //    std::cout << "connect function failed with error : "<< WSAGetLastError() << std::endl;
+    //    iResult = closesocket(Client);
+    //    Client = INVALID_SOCKET;
+    //    if (iResult == SOCKET_ERROR)
+    //        std::cout << "closesocket function failed with error :"<< WSAGetLastError() << std::endl;
+    //    return false;
+    //}
 
-    int yes = 1;
-    iResult = setsockopt(Client,
-        IPPROTO_TCP,
-        TCP_NODELAY,
-        (char*)&yes,
-        sizeof(int));    // 1 - on, 0 - off
-    if (iResult < 0)
-    {
-        printf("TCP NODELAY Failed\n");
-    }
-    else  printf("TCP NODELAY SET\n");
-
-    sslCtx = create_context();
-    sslClient = SSL_new(sslCtx);
-    SSL_set_fd(sslClient, Client);
-
-
-
+    //int yes = 1;
+    //iResult = setsockopt(Client,
+    //    IPPROTO_TCP,
+    //    TCP_NODELAY,
+    //    (char*)&yes,
+    //    sizeof(int));    // 1 - on, 0 - off
+    //if (iResult < 0)
+    //{
+    //    printf("TCP NODELAY Failed\n");
+    //}
+    //else  printf("TCP NODELAY SET\n");
 
 
     return true;
@@ -257,6 +288,13 @@ bool StopClient(void)
         WaitForSingleObject(hThreadClient, INFINITE);
         CloseHandle(hThreadClient);
         hThreadClient = INVALID_HANDLE_VALUE;
+
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        closesocket(Client);
+        SSL_CTX_free(ctx);
+        tls_cleanup_openssl();
+
     }
 ;
     return true;
@@ -310,104 +348,6 @@ void ProcessMessage(char* MsgBuffer)
 }
 
 static DWORD WINAPI ThreadClient(LPVOID ivalue)
-{    
-    HANDLE ghEvents[2];
-    int NumEvents;
-    int iResult;
-    DWORD dwEvent;
-    InputMode Mode = MsgHeader;
-    unsigned int InputBytesNeeded=sizeof(TMesssageHeader);
-    TMesssageHeader MsgHdr;
-    char* InputBuffer = NULL;
-    char* InputBufferWithOffset = NULL;
-    unsigned int CurrentInputBufferSize = 1024 * 10;
-  
-    InputBuffer = (char*)std::realloc(InputBuffer, CurrentInputBufferSize);
-    InputBufferWithOffset = InputBuffer;
-
-    if (InputBuffer == NULL)
-    {
-      std::cout << "InputBuffer Realloc failed" << std::endl;
-      ExitProcess(0);
-      return 1;
-    }
- 
-    hClientEvent = WSACreateEvent();
-
-    // Perform the SSL/TLS handshake
-    if (SSL_connect(sslClient) <= 0) {
-        ERR_print_errors_fp(stderr);
-        SSL_free(sslClient);
-        SSL_CTX_free(sslCtx);
-        closesocket(Client);
-        WSACloseEvent(hClientEvent);
-        WSACleanup();
-        return 1;
-    }
-
-    // Main loop to handle events
-    while (true) {
-        DWORD eventResult = WSAWaitForMultipleEvents(1, &hClientEvent, FALSE, WSA_INFINITE, FALSE);
-        if (eventResult == WSA_WAIT_FAILED) {
-            perror("WSAWaitForMultipleEvents failed");
-            break;
-        }
-
-        WSANETWORKEVENTS networkEvents;
-        if (WSAEnumNetworkEvents(Client, hClientEvent, &networkEvents) == SOCKET_ERROR) {
-            perror("WSAEnumNetworkEvents failed");
-            break;
-        }
-
-        if (networkEvents.lNetworkEvents & FD_READ) {
-            char buf[1024];
-            int bytes = SSL_read(sslClient, buf, sizeof(buf));
-            if (bytes > 0) {
-                buf[bytes] = '\0';
-                printf("Received: %s\n", buf);
-            }
-            else if (bytes == 0) {
-                printf("Connection closed by peer\n");
-                break;
-            }
-            else {
-                int err = SSL_get_error(sslClient, bytes);
-                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                    // SSL_read needs to be called again
-                    continue;
-                }
-                else {
-                    ERR_print_errors_fp(stderr);
-                    break;
-                }
-            }
-        }
-
-        if (networkEvents.lNetworkEvents & FD_WRITE) {
-            // Handle writable socket (if needed)
-        }
-
-        if (networkEvents.lNetworkEvents & FD_CLOSE) {
-            printf("Connection closed\n");
-            break;
-        }
-
-        // Reset the event
-        WSAResetEvent(hClientEvent);
-    }
-
-
-    if (InputBuffer)
-    {
-        std::free(InputBuffer);
-        InputBuffer = nullptr;
-    }
-    ClientCleanup();
-    std::cout << "Client Exiting" << std::endl;
-    return 0;
-}
-
-static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
 {
     HANDLE ghEvents[2];
     int NumEvents;
@@ -434,7 +374,6 @@ static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
     hEndClientEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     if (WSAEventSelect(Client, hClientEvent, FD_READ | FD_CLOSE) == SOCKET_ERROR)
-
     {
         std::cout << "WSAEventSelect() failed with error " << WSAGetLastError() << std::endl;
         iResult = closesocket(Client);
@@ -474,7 +413,8 @@ static DWORD WINAPI ThreadClient_backup(LPVOID ivalue)
                     else
                     {
                         int iResult;
-                        iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+                        //iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+                        iResult = ReadDataTLSNoBlock(ssl, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
                         if (iResult != SOCKET_ERROR)
                         {
                             if (iResult == 0)
