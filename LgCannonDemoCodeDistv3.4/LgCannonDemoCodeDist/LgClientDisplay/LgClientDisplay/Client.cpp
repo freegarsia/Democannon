@@ -79,12 +79,24 @@ bool SendCodeToSever(unsigned char Code)
     return false;
 }
 
-bool SendPasswordToServer(const char* msg)
+bool SendPasswordToServer(unsigned char* msg)
 {
     if (IsClientConnected())
     {
-        SSL_write(ssl, msg, strlen(msg));
-        return true;
+        //SSL_write(ssl, "test1234", strlen("test1234"));
+        //return true;
+
+        TMesssagePWCommands MsgCmd;
+        int msglen = sizeof(TMesssageHeader) + sizeof(unsigned char);
+        //printf("Message len %d\n", msglen);
+        MsgCmd.Hdr.Len = htonl(sizeof(unsigned char));
+        MsgCmd.Hdr.Type = htonl(MT_CHANGE_PASSWORD);
+        MsgCmd.pw = msg;
+
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgCmd, msglen) == msglen)
+        {
+            return true;
+        }
     }
     return false;
 }
@@ -100,7 +112,8 @@ bool SendCalibToSever(unsigned char Code)
         MsgCmd.Hdr.Type = htonl(MT_CALIB_COMMANDS);
         MsgCmd.Commands = Code;
 
-        if (WriteDataTcp(Client, (unsigned char*)&MsgCmd, msglen) == msglen)
+        //if (WriteDataTcp(Client, (unsigned char*)&MsgCmd, msglen) == msglen)
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgCmd, msglen) == msglen)
         {
             return true;
         }
@@ -137,7 +150,8 @@ bool SendPreArmCodeToSever(char* Code)
         MsgPreArm.Hdr.Len = htonl((int)strlen(Code) + 1);
         MsgPreArm.Hdr.Type = htonl(MT_PREARM);
         strcpy_s((char*)MsgPreArm.Code, sizeof(MsgPreArm.Code), Code);
-        if (WriteDataTcp(Client, (unsigned char*)&MsgPreArm, msglen) == msglen)
+        //if (WriteDataTcp(Client, (unsigned char*)&MsgPreArm, msglen) == msglen)
+        if (WriteDataTLS(ssl, (unsigned char*)&MsgPreArm, msglen) == msglen)
         {
             return true;
         }
@@ -166,6 +180,10 @@ bool SendStateChangeRequestToSever(SystemState_t State)
 }
 
 void ConfigureContext(SSL_CTX* ctx) {
+    extern unsigned char* client_cert;
+    extern unsigned char* client_key;
+    extern unsigned char* ca_cert;
+
     // 클라이언트 인증서를 설정합니다.
     if (SSL_CTX_use_certificate_file(ctx, "C:/keys/client-cert.pem", SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stdout);
@@ -175,6 +193,14 @@ void ConfigureContext(SSL_CTX* ctx) {
         ERR_print_errors_fp(stdout);
         exit(EXIT_FAILURE);
     }
+
+    if (SSL_CTX_load_verify_locations(ctx, "C:/keys/ca-cert.pem", NULL) <= 0) {
+        ERR_print_errors_fp(stdout);
+        exit(EXIT_FAILURE);
+    }
+
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_verify_depth(ctx, 4);
 }
 
 bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
@@ -192,41 +218,14 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     ctx = tls_create_context();
     ConfigureContext(ctx);
 
-    Client = socket(AF_INET, SOCK_STREAM, 0);
-    if (Client < 0) {
-        perror("Unable to create socket");
-        exit(EXIT_FAILURE);
-    }
-
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(4443);
-    inet_pton(AF_INET, "localhost", &addr.sin_addr);
-
-    if (connect(Client, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("Unable to connect");
-        exit(EXIT_FAILURE);
-        return false;
-    }
-
-    ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, Client);
-
-    if (SSL_connect(ssl) <= 0) {
-        ERR_print_errors_fp(stderr);
-        return false;
-    }
-
-
-
-
-    sprintf_s(remoteportno,sizeof(remoteportno), "%d", remoteport);
+    sprintf_s(remoteportno, sizeof(remoteportno), "%d", remoteport);
 
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    /*iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
+    iResult = getaddrinfo(remotehostname, remoteportno, &hints, &result);
     if (iResult != 0)
     {
         std::cout << "getaddrinfo: Failed" << std::endl;
@@ -236,48 +235,63 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     {
         std::cout << "getaddrinfo: Failed" << std::endl;
         return false;
-    }*/
+    }
 
-    //if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
-    //{
-    //    freeaddrinfo(result);
-    //    std::cout << "video client socket() failed with error "<< WSAGetLastError() << std::endl;
-    //    return false;
+    if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
+    {
+        freeaddrinfo(result);
+        std::cout << "video client socket() failed with error " << WSAGetLastError() << std::endl;
+        return false;
+    }
+
+    //----------------------
+    // Connect to server.
+    iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
+    freeaddrinfo(result);
+    if (iResult == SOCKET_ERROR) {
+        std::cout << "connect function failed with error : " << WSAGetLastError() << std::endl;
+        iResult = closesocket(Client);
+        Client = INVALID_SOCKET;
+        if (iResult == SOCKET_ERROR)
+            std::cout << "closesocket function failed with error :" << WSAGetLastError() << std::endl;
+        return false;
+    }
+
+    int yes = 1;
+    iResult = setsockopt(Client,
+        IPPROTO_TCP,
+        TCP_NODELAY,
+        (char*)&yes,
+        sizeof(int));    // 1 - on, 0 - off
+    if (iResult < 0)
+    {
+        printf("TCP NODELAY Failed\n");
+    }
+    else  printf("TCP NODELAY SET\n");
+
+    //addr.sin_family = AF_INET;
+    //addr.sin_port = htons(4443);
+    //inet_pton(AF_INET, "172.20.50.137", &addr.sin_addr);
+
+    //if (connect(Client, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    //    perror("Unable to connect");
+    //    return (false);
     //}
 
-    ////----------------------
-    //// Connect to server.
-    //iResult = connect(Client, result->ai_addr, (int)result->ai_addrlen);
-    //freeaddrinfo(result);
-    //if (iResult == SOCKET_ERROR) {
-    //    std::cout << "connect function failed with error : "<< WSAGetLastError() << std::endl;
-    //    iResult = closesocket(Client);
-    //    Client = INVALID_SOCKET;
-    //    if (iResult == SOCKET_ERROR)
-    //        std::cout << "closesocket function failed with error :"<< WSAGetLastError() << std::endl;
-    //    return false;
-    //}
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, Client);
 
-    //int yes = 1;
-    //iResult = setsockopt(Client,
-    //    IPPROTO_TCP,
-    //    TCP_NODELAY,
-    //    (char*)&yes,
-    //    sizeof(int));    // 1 - on, 0 - off
-    //if (iResult < 0)
-    //{
-    //    printf("TCP NODELAY Failed\n");
-    //}
-    //else  printf("TCP NODELAY SET\n");
-
+    if (SSL_connect(ssl) <= 0) {
+        ERR_print_errors_fp(stderr);
+        return false;
+    }
 
     return true;
-
 }
 bool StartClient(void)
 {
- hThreadClient = CreateThread(NULL, 0, ThreadClient, NULL, 0, &ThreadClientID);
- return true;
+     hThreadClient = CreateThread(NULL, 0, ThreadClient, NULL, 0, &ThreadClientID);
+     return true;
 }
 
 bool StopClient(void)
@@ -393,7 +407,8 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
             FALSE,           // wait for any object
             INFINITE);  // INFINITE) wait
 
-        if (dwEvent == WAIT_OBJECT_0) break;
+        if (dwEvent == WAIT_OBJECT_0) 
+            break;
         else if (dwEvent == WAIT_OBJECT_0 + 1)
         {
             WSANETWORKEVENTS NetworkEvents;
@@ -434,7 +449,6 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
                                 {
                                     if (Mode == MsgHeader)
                                     {
-
                                         InputBufferWithOffset = InputBuffer + sizeof(TMesssageHeader);
                                         memcpy(&MsgHdr, InputBuffer, sizeof(TMesssageHeader));
                                         MsgHdr.Len = ntohl(MsgHdr.Len);

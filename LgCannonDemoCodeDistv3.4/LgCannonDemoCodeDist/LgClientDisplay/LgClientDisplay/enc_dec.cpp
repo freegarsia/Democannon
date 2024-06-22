@@ -24,7 +24,9 @@ void DecryptFile(const std::string& inputFilename, const std::string& outputFile
     );
 }
 
-std::string EncryptText(const std::string& plaintext, const byte key[AES::DEFAULT_KEYLENGTH], const byte iv[AES::BLOCKSIZE])
+std::string EncryptText(const std::string& plaintext, 
+                        const byte key[AES::DEFAULT_KEYLENGTH], 
+                        const byte iv[AES::BLOCKSIZE])
 {
     std::string ciphertext;
     CBC_Mode<AES>::Encryption encryption;
@@ -39,7 +41,9 @@ std::string EncryptText(const std::string& plaintext, const byte key[AES::DEFAUL
     return ciphertext;
 }
 
-std::string DecryptText(const std::string& ciphertext, const byte key[AES::DEFAULT_KEYLENGTH], const byte iv[AES::BLOCKSIZE])
+std::string DecryptText(const std::string& ciphertext,
+                        const byte key[AES::DEFAULT_KEYLENGTH],
+                        const byte iv[AES::BLOCKSIZE])
 {
     std::string decryptedtext;
     CBC_Mode<AES>::Decryption decryption;

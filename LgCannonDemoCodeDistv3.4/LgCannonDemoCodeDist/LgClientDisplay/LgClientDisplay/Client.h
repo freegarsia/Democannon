@@ -8,7 +8,7 @@ bool SendTargetOrderToSever(char *TargetOrder);
 bool SendPreArmCodeToSever(char* Code);
 bool SendStateChangeRequestToSever(SystemState_t State);
 bool SendCalibToSever(unsigned char Code);
-bool SendPasswordToServer(const char* Code);
+bool SendPasswordToServer(unsigned char* Code);
 //-----------------------------------------------------------------
 // END of File
 //-----------------------------------------------------------------

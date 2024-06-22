@@ -28,6 +28,7 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <shlobj.h>
 
 #pragma comment(lib,"comctl32.lib")
 #ifdef _DEBUG
@@ -85,6 +86,15 @@ static TCHAR userPassword[MAX_PASSWORD_LENGTH] = _T("");
 static TCHAR filePath[MAX_FILEPATH_LENGTH] = _T("");
 static bool is_password_same = false;
 static TCHAR password_for_change[MAX_PASSWORD_LENGTH] = _T("");
+static unsigned char* server_cert;
+static unsigned char* server_key;
+static unsigned char* client_cert;
+static unsigned char* client_key;
+static unsigned char* ca_cert;
+
+static byte default_logger_key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
+static byte default_logger_iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
+
 
 static FILE* pCout = NULL;
 static HWND hWndMainToolbar;
@@ -121,7 +131,6 @@ INT_PTR CALLBACK DialogProc_PW(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         switch (LOWORD(wParam))
         {
         case IDOK:
-            unsigned char* key;
             TCHAR password_1[MAX_PASSWORD_LENGTH];
             TCHAR password_2[MAX_PASSWORD_LENGTH];
 
@@ -150,6 +159,26 @@ INT_PTR CALLBACK DialogProc_PW(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
     return (INT_PTR)FALSE;
 }
 
+bool OpenFolderDialog(HWND hwndOwner, TCHAR* selectedFolder, int bufferSize) {
+    BROWSEINFO bi = { 0 };
+    bi.hwndOwner = hwndOwner;
+    bi.ulFlags = BIF_NEWDIALOGSTYLE | BIF_NONEWFOLDERBUTTON | BIF_USENEWUI;
+    bi.lpfn = NULL; // No callback function
+    bi.lpszTitle = L"Select a folder";
+
+    // 폴더 선택 대화 상자 열기
+    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+    if (pidl != NULL) {
+        // PIDL을 폴더 경로로 변환
+        if (SHGetPathFromIDList(pidl, selectedFolder)) {
+            CoTaskMemFree(pidl); // PIDL 메모리 해제
+            return true;
+        }
+        CoTaskMemFree(pidl); // PIDL 메모리 해제
+    }
+    return false;
+}
+
 INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(lParam);
@@ -164,27 +193,35 @@ INT_PTR CALLBACK DialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
         case IDC_LOAD_KEY:
         {
             std::cout << "load key is clicked" << std::endl;
+            TCHAR szFolderPath[MAX_PATH] = L"";
 
-            OPENFILENAME ofn;       // 공용 대화 상자 구조체
-            wchar_t szFile[260];    // 파일 경로를 저장할 버퍼
-
-            // 구조체 크기 설정 및 초기화
-            ZeroMemory(&szFile, sizeof(szFile));
-            ZeroMemory(&ofn, sizeof(ofn));
-            ofn.lStructSize = sizeof(ofn);
-            ofn.hwndOwner = hDlg;
-            ofn.lpstrFile = szFile;
-            ofn.nMaxFile = sizeof(szFile) / sizeof(szFile[0]);
-            ofn.lpstrFilter = L"All Files\0*.*\0Text Files\0*.TXT\0";
-            ofn.nFilterIndex = 1;
-            ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-
-            // 파일 열기 대화 상자 표시
-            if (GetOpenFileName(&ofn) == TRUE)
+            if (OpenFolderDialog(hDlg, szFolderPath, MAX_PATH))
             {
-                // 선택된 파일 경로 처리
-                SetDlgItemText(hDlg, IDC_KEY_LOC, ofn.lpstrFile);
+                SetDlgItemText(hDlg, IDC_KEY_LOC, szFolderPath);
             }
+            else {
+                std::wcout << L"No folder selected." << std::endl;
+            }
+
+
+            // File explorer usage
+            //OPENFILENAME ofn;       // 공용 대화 상자 구조체
+            //wchar_t szFile[260];    // 파일 경로를 저장할 버퍼
+
+            //ZeroMemory(&szFile, sizeof(szFile));
+            //ZeroMemory(&ofn, sizeof(ofn));
+            //ofn.lStructSize = sizeof(ofn);
+            //ofn.hwndOwner = hDlg;
+            //ofn.lpstrFile = szFile;
+            //ofn.nMaxFile = sizeof(szFile) / sizeof(szFile[0]);
+            //ofn.lpstrFilter = L"All Files\0*.*\0Text Files\0*.TXT\0";
+            //ofn.nFilterIndex = 1;
+            //ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+            //if (GetOpenFileName(&ofn) == TRUE)
+            //{
+            //    SetDlgItemText(hDlg, IDC_KEY_LOC, ofn.lpstrFile);
+            //}
         }
         break;
         case IDOK:
@@ -210,12 +247,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(lpCmdLine);
     WSADATA wsaData;
     HRESULT hr;
-
-
-    // AES 키와 IV 설정 (암호화와 복호화에 동일하게 사용해야 함)
-    byte key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                                    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
-    byte iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
 
     // Logging config
     try {
@@ -252,7 +283,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         wchar_t OK_msg[] = L"OK is clicked";
         cannonLogger_info("Try Key file decryption");
         
-        unsigned char *key;
         int decrypted_len = 0;
 
         if (filePath[0] == _T('\0') || userPassword[0] == _T('\0')) {
@@ -261,6 +291,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         try{
+            char filePathWithFileName[256];
             char converted_filaPath[256];
             char converted_password[256];
             size_t filePath_size = sizeof(converted_filaPath);
@@ -272,16 +303,34 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             wcstombs_s(&convertedChars, converted_filaPath, filePath_size, filePath, _TRUNCATE);
             wcstombs_s(&convertedChars2, converted_password, password_size, userPassword, _TRUNCATE);
 
-            key = tls_alloc_decrypt_file(converted_filaPath, converted_password, &decrypted_len);
+            // set file path
+            strcpy_s(filePathWithFileName, converted_filaPath);
+            strcat_s(filePathWithFileName, "\\server-cert.pem.enc");
+            server_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+
+            strcpy_s(filePathWithFileName, converted_filaPath);
+            strcat_s(filePathWithFileName, "\\server-key.pem.enc");
+            server_key = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+
+            strcpy_s(filePathWithFileName, converted_filaPath);
+            strcat_s(filePathWithFileName, "\\client-cert.pem.enc");
+            client_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+
+            strcpy_s(filePathWithFileName, converted_filaPath);
+            strcat_s(filePathWithFileName, "\\client-key.pem.enc");
+            client_key = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+
+            strcpy_s(filePathWithFileName, converted_filaPath);
+            strcat_s(filePathWithFileName, "\\ca-cert.pem.enc");
+            ca_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+
+            //std::cout << "Decrypted text: " << server_cert << "," << server_key << std::endl;
         }
         catch (const CryptoPP::Exception& e)
         {
-            DisplayMessageOkBox("Password is not correct!");
+            DisplayMessageOkBox("Password is not correct! Or There are no keys on the Folder.");
             //return 1;
         }
-
-        // 결과 출력
-        std::cout << "Decrypted text: " << key << std::endl;
     }
     else if (ret == IDCANCEL) {
         cannonLogger_info("KEY location setting is terminated");
@@ -1043,11 +1092,19 @@ static int OnChangePassword(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 {
     if (IsClientConnected())
     {
-        char converted[MAX_PASSWORD_LENGTH];
-        size_t password_size = sizeof(password_for_change);
-
+        unsigned char converted[MAX_PASSWORD_LENGTH];
         size_t convertedChars = 0;
-        wcstombs_s(&convertedChars, converted, password_size, password_for_change, _TRUNCATE);
+
+#ifdef _UNICODE
+        errno_t err = wcstombs_s(&convertedChars, reinterpret_cast<char*>(converted), MAX_PASSWORD_LENGTH, password_for_change, _TRUNCATE);
+#else
+        errno_t err = mbstombs_s(&convertedChars, reinterpret_cast<char*>(converted), MAX_PASSWORD_LENGTH, password_for_change, _TRUNCATE);
+#endif
+
+        if (err != 0) {
+            std::cout << "Error in conversion: " << err << std::endl;
+            return 1;
+        }
 
         SendPasswordToServer(converted);
     }
