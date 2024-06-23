@@ -218,6 +218,7 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     ctx = tls_create_context();
     ConfigureContext(ctx);
 
+    
     sprintf_s(remoteportno, sizeof(remoteportno), "%d", remoteport);
 
     memset(&hints, 0, sizeof(struct addrinfo));
@@ -269,14 +270,25 @@ bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
     }
     else  printf("TCP NODELAY SET\n");
 
-    //addr.sin_family = AF_INET;
-    //addr.sin_port = htons(4443);
-    //inet_pton(AF_INET, "172.20.50.137", &addr.sin_addr);
+    
+    /*
+    if ((Client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == INVALID_SOCKET)
+    {
+        freeaddrinfo(result);
+        std::cout << "video client socket() failed with error " << WSAGetLastError() << std::endl;
+        return false;
+    }
 
-    //if (connect(Client, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-    //    perror("Unable to connect");
-    //    return (false);
-    //}
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(4443);
+    inet_pton(AF_INET, "172.20.50.137", &addr.sin_addr);
+
+    if (connect(Client, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("Unable to connect");
+        return (false);
+    }
+    */
 
     ssl = SSL_new(ctx);
     SSL_set_fd(ssl, Client);
@@ -430,9 +442,9 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
                         int iResult;
                         //iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
                         iResult = ReadDataTLSNoBlock(ssl, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
-                        if (iResult != SOCKET_ERROR)
+                        if (iResult > 0)
                         {
-                            if (iResult == 0)
+                            if (iResult == 1)   // new line character is received
                             {
                                 Mode = MsgHeader;
                                 InputBytesNeeded = sizeof(TMesssageHeader);
@@ -480,8 +492,16 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
 
                             }
                         }
-                        else std::cout << "ReadDataTcpNoBlock buff failed " << WSAGetLastError() << std::endl;
+                        else
+                        {
+                            int ssl_error = SSL_get_error(ssl, iResult);
+                            std::cout << "ReadDataTcpNoBlock buff failed : " << ssl_error << std::endl;
 
+                            if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
+                                // Retry logic for non-blocking operations
+                            }
+                            
+                        }
                     }
 
                 }

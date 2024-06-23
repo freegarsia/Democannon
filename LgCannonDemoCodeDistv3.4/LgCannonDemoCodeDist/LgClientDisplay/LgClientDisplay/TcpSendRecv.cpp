@@ -42,13 +42,13 @@ int ReadDataTcp(SOCKET socket, unsigned char* data, int length)
 //-----------------------------------------------------------------
 int ReadDataTcpNoBlock(SOCKET socket, unsigned char* data, int length)
 {
-    cannonLogger_info((const char*)data);
+    cannonLogger_info("ReadDataTCPNoBlock");
     return(recv(socket, (char*)data, length, 0));
 }
 
 int ReadDataTLSNoBlock(SSL* ssl, unsigned char* data, int length)
 {
-    //cannonLogger_info("");
+    cannonLogger_info("ReadDataTLSNoBlock");
     int bytes_read = SSL_read(ssl, (char *)data, length);
     if (bytes_read <= 0) {
         int err = SSL_get_error(ssl, bytes_read);
