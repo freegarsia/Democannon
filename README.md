@@ -32,8 +32,9 @@ A Project for LG24Security Edu.
 
 #### IV. Local Testing
 1. Password Constraints
-1) size should be 10 <= pw <= 15
-2) include at least 1 symbole and 1 number BUT blank is not permitted
+ 1) size should be 10 <= pw <= 15
+ 2) include at least 1 symbole and 1 number BUT blank is not permitted
+ 3) Permitted symbols : !@#$%^&*()_+
 
 
 ## Design documentation
