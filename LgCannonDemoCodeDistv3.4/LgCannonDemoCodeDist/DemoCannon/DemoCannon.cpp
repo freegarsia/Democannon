@@ -761,7 +761,12 @@ int main(int argc, const char** argv)
 
     printf("Listening for connections\n");
     clilen = sizeof(cli_addr);
+#if defined(TLS_ENABLE)
     if  ((TcpConnectedPort=AcceptTcpConnection(TcpListenPort,&cli_addr,&clilen, &tls))==NULL)
+#else /*TLS_ENABLE*/
+    if  ((TcpConnectedPort=AcceptTcpConnection(TcpListenPort,&cli_addr,&clilen))==NULL)
+#endif /*TLS_ENABLE*/
+
     {
         printf("AcceptTcpConnection Failed\n");
         return(-1);
@@ -856,7 +861,7 @@ int main(int argc, const char** argv)
             resize(Frame, ResizedFrame, Size(Frame.cols/2,Frame.rows/2));
             DrawCrosshair(ResizedFrame,Point((int)xCorrect,(int)yCorrect),Scalar(0, 0, 255)); //BGR
         }
-#if 0
+#if 1
 #if defined(TLS_ENABLE)
         if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls)<0))  break;
 #else /*TLS_ENABLE*/
@@ -976,20 +981,23 @@ static int PrintfSend(const char *fmt, ...)
 //------------------------------------------------------------------------------------------------
 static int SendSystemState(SystemState_t State)
 {
- TMesssageSystemState StateMsg;
- int                  retval;
- pthread_mutex_lock(&TCP_Mutex);
- StateMsg.State=(SystemState_t)htonl(State);
- StateMsg.Hdr.Len=htonl(sizeof(StateMsg.State));
- StateMsg.Hdr.Type=htonl(MT_STATE);
- OLED_UpdateStatus();
+    TMesssageSystemState StateMsg;
+    int                  retval;
+
+    //State = PREARMED;
+    pthread_mutex_lock(&TCP_Mutex);
+    StateMsg.State=(SystemState_t)htonl(State);
+    StateMsg.Hdr.Len=htonl(sizeof(StateMsg.State));
+    StateMsg.Hdr.Type=htonl(MT_STATE);
+    OLED_UpdateStatus();
 #if defined(TLS_ENABLE)
- retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState), &tls);
+    retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState), &tls);
 #else /*TLS_ENABLE*/
     retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState));
 #endif /*TLS_ENABLE*/
- pthread_mutex_unlock(&TCP_Mutex);
- return(retval);
+    printf("SendSystemState,%d\r\n", State);
+    pthread_mutex_unlock(&TCP_Mutex);
+    return(retval);
 }
 //------------------------------------------------------------------------------------------------
 // END static int SendSystemState
@@ -999,20 +1007,20 @@ static int SendSystemState(SystemState_t State)
 //------------------------------------------------------------------------------------------------
 static void ProcessPreArm(char * Code)
 {
- char Decode[]={0x61,0x60,0x76,0x75,0x67,0x7b,0x72,0x7c};
+    char Decode[]={0x61,0x60,0x76,0x75,0x67,0x7b,0x72,0x7c};
 
- if (SystemState==SAFE)
-  {
-    if ((Code[sizeof(Decode)]==0) && (strlen(Code)==sizeof(Decode)))
-      {
-        for (int i=0;i<sizeof(Decode);i++) Code[i]^=Decode[i];
-        if (strcmp((const char*)Code,"PREARMED")==0) /*12345678*/
-          {
-            SystemState=PREARMED;
-            SendSystemState(SystemState);
-          }
-      }
-  }
+    if (SystemState==SAFE)
+    {
+        if ((Code[sizeof(Decode)]==0) && (strlen(Code)==sizeof(Decode)))
+        {
+            for (int i=0;i<sizeof(Decode);i++) Code[i]^=Decode[i];
+                if (strcmp((const char*)Code,"PREARMED")==0) /*12345678*/
+                {
+                    SystemState=PREARMED;
+                    SendSystemState(SystemState);
+                }
+        }
+    }
 }
 //------------------------------------------------------------------------------------------------
 // END static void ProcessPreArm
@@ -1167,71 +1175,70 @@ static void ProcessFiringOrder(char * FiringOrder)
 //------------------------------------------------------------------------------------------------
 static void ProcessCommands(unsigned char cmd)
 {
- if (((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=PREARMED) &&
-     ((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL))
+    if (((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=PREARMED) &&
+        ((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL))
     {
-      printf("received Commands outside of Pre-Arm or Armed Manual State %x \n",cmd);
-      return;
+        printf("received Commands outside of Pre-Arm or Armed Manual State %x \n",cmd);
+        return;
     }
- if (((cmd==FIRE_START) || (cmd==FIRE_STOP)) && ((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL))
+    if (((cmd==FIRE_START) || (cmd==FIRE_STOP)) && ((SystemState & CLEAR_LASER_FIRING_ARMED_CALIB_MASK)!=ARMED_MANUAL))
     {
-      printf("received Fire Commands outside of Armed Manual State %x \n",cmd);
-      return;
+        printf("received Fire Commands outside of Armed Manual State %x \n",cmd);
+        return;
     }
 
-
-      switch(cmd)
-        {
-         case PAN_LEFT_START:
-              RunCmds|=PAN_LEFT_START;
-              RunCmds&=PAN_RIGHT_STOP;
-              Pan+=INC;
-              ServoAngle(PAN_SERVO, Pan);
-              break;
-         case PAN_RIGHT_START:
-              RunCmds|=PAN_RIGHT_START;
-              RunCmds&=PAN_LEFT_STOP;
-              Pan-=INC;
-              ServoAngle(PAN_SERVO, Pan);
-              break;
-         case PAN_UP_START:
-              RunCmds|=PAN_UP_START;
-              RunCmds&=PAN_DOWN_STOP;
-              Tilt+=INC;
-              ServoAngle(TILT_SERVO, Tilt);
-              break;
-         case PAN_DOWN_START:
-              RunCmds|=PAN_DOWN_START;
-              RunCmds&=PAN_UP_STOP;
-              Tilt-=INC;
-              ServoAngle(TILT_SERVO, Tilt);
-              break;
-         case FIRE_START:
-              RunCmds|=FIRE_START;
-              fire(true);
-              SendSystemState(SystemState);
-              break;
-         case PAN_LEFT_STOP:
-              RunCmds&=PAN_LEFT_STOP;
-              break;
-         case PAN_RIGHT_STOP:
-              RunCmds&=PAN_RIGHT_STOP;
-              break;
-         case PAN_UP_STOP:
-              RunCmds&=PAN_UP_STOP;
-              break;
-         case PAN_DOWN_STOP:
-              RunCmds&=PAN_DOWN_STOP;
-              break;
-         case FIRE_STOP:
-              RunCmds&=FIRE_STOP;
-              fire(false);
-              SendSystemState(SystemState);
-              break;
-         default:
-              printf("invalid command %x\n",cmd);
-              break;
-      }
+    switch(cmd)
+    {
+    case PAN_LEFT_START:
+        RunCmds|=PAN_LEFT_START;
+        RunCmds&=PAN_RIGHT_STOP;
+        Pan+=INC;
+        ServoAngle(PAN_SERVO, Pan);
+        break;
+    case PAN_RIGHT_START:
+        RunCmds|=PAN_RIGHT_START;
+        RunCmds&=PAN_LEFT_STOP;
+        Pan-=INC;
+        ServoAngle(PAN_SERVO, Pan);
+        break;
+    case PAN_UP_START:
+        RunCmds|=PAN_UP_START;
+        RunCmds&=PAN_DOWN_STOP;
+        Tilt+=INC;
+        ServoAngle(TILT_SERVO, Tilt);
+        break;
+    case PAN_DOWN_START:
+        RunCmds|=PAN_DOWN_START;
+        RunCmds&=PAN_UP_STOP;
+        Tilt-=INC;
+        ServoAngle(TILT_SERVO, Tilt);
+        break;
+    case FIRE_START:
+        RunCmds|=FIRE_START;
+        fire(true);
+        SendSystemState(SystemState);
+        break;
+    case PAN_LEFT_STOP:
+        RunCmds&=PAN_LEFT_STOP;
+        break;
+    case PAN_RIGHT_STOP:
+        RunCmds&=PAN_RIGHT_STOP;
+        break;
+    case PAN_UP_STOP:
+        RunCmds&=PAN_UP_STOP;
+        break;
+    case PAN_DOWN_STOP:
+        RunCmds&=PAN_DOWN_STOP;
+        break;
+    case FIRE_STOP:
+        RunCmds&=FIRE_STOP;
+        fire(false);
+        SendSystemState(SystemState);
+        break;
+    default:
+        printf("invalid command %x\n",cmd);
+        break;
+    }
 
 }
 //------------------------------------------------------------------------------------------------
@@ -1492,6 +1499,7 @@ static void HandleInputChar( Mat &frame)
   }
 }
 
+#if defined(TLS_ENABLE)
 int tls_test_server(st_tls* p_this) {
     int sock;
     struct sockaddr_in addr;
@@ -1549,6 +1557,7 @@ int tls_test_server(st_tls* p_this) {
     EVP_cleanup();
     return 0;
 }
+#endif /*TLS_ENABLE*/
 
 //-----------------------------------------------------------------
 // END HandleInputChar
