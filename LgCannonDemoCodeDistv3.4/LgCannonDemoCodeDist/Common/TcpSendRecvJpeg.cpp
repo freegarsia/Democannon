@@ -29,13 +29,21 @@ int TcpSendImageAsJpeg(TTcpConnectedPort * TcpConnectedPort,cv::Mat Image)
     cv::imencode(".jpg", Image, sendbuff, param);
     MsgHdr.Len=htonl(sendbuff.size()); // convert image size to network format
 #if defined(TLS_ENABLE)
-    if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader), p_tls)!=sizeof(TMesssageHeader)) return(-1);
-    return(WriteDataTcp(TcpConnectedPort,sendbuff.data(), sendbuff.size(), p_tls));
+    int retval = WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader), p_tls);
+    if (retval !=sizeof(TMesssageHeader)) {
+        printf("TcpSendImageAsJpeg,1,retval=%i\r\n", retval);
+        return -1;
+    }
+    retval = WriteDataTcp(TcpConnectedPort,sendbuff.data(), sendbuff.size(), p_tls);
+    if (retval != sendbuff.size()) {
+        printf("TcpSendImageAsJpeg,1,retval=%i\r\n", retval);
+        return -2;
+    }
+    return retval;
 #else /*TLS_ENABLE*/
     if (WriteDataTcp(TcpConnectedPort,(unsigned char *)&MsgHdr,sizeof(TMesssageHeader))!=sizeof(TMesssageHeader)) return(-1);
     return(WriteDataTcp(TcpConnectedPort,sendbuff.data(), sendbuff.size()));
 #endif /*TLS_ENABLE*/
-
 }
 
 //-----------------------------------------------------------------

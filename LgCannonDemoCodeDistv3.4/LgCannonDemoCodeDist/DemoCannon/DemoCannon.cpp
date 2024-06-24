@@ -149,6 +149,8 @@ static ObjectDetector *detector;
 
 int caldata_read_offsets(float* p_xCorrect, float* p_ycorrect, st_aes* p_aes, const char* sz_password)
 {
+    return 0;
+
     int plaintext_len = 0;
     unsigned char* plaintext = aes_decrypt_file_to_alloc(p_aes, "Correct.ini", sz_password, &plaintext_len);
     if (plaintext == NULL || plaintext_len == 0) {
@@ -179,6 +181,8 @@ int caldata_read_offsets(float* p_xCorrect, float* p_ycorrect, st_aes* p_aes, co
 
 int caldata_write_offsets(float xCorrect, float yCorrect, st_aes* p_aes)
 {
+    return 0;
+
     unsigned char buf[256] = {0,};
     const int len = snprintf((char*)buf, sizeof(buf), "xCorrect %f\nyCorrect %f\n", xCorrect, yCorrect);
     if (aes_encrypt_to_file(p_aes, buf, len, "Correct.ini") < 0) {
@@ -916,7 +920,12 @@ int main(int argc, const char** argv)
         }
 #if 1
 #if defined(TLS_ENABLE)
-        if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls)<0))  break;
+        const int result = TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame, &tls);
+        if ((isConnected) && result <0) {
+            printf("main,fail:connected=%i,send=%i\r\n", isConnected, result);
+            sleep(1);
+            continue;
+        }
 #else /*TLS_ENABLE*/
         if ((isConnected) && (TcpSendImageAsJpeg(TcpConnectedPort,ResizedFrame)<0))  break;
 #endif /*TLS_ENABLE*/
@@ -1037,7 +1046,6 @@ static int SendSystemState(SystemState_t State)
     TMesssageSystemState StateMsg;
     int                  retval;
 
-    //State = PREARMED;
     pthread_mutex_lock(&TCP_Mutex);
     StateMsg.State=(SystemState_t)htonl(State);
     StateMsg.Hdr.Len=htonl(sizeof(StateMsg.State));
@@ -1048,7 +1056,7 @@ static int SendSystemState(SystemState_t State)
 #else /*TLS_ENABLE*/
     retval=WriteDataTcp(TcpConnectedPort,(unsigned char *)&StateMsg,sizeof(TMesssageSystemState));
 #endif /*TLS_ENABLE*/
-    printf("SendSystemState,%d\r\n", State);
+    printf("SendSystemState,ret=%i,0x%x\r\n", retval, State);
     pthread_mutex_unlock(&TCP_Mutex);
     return(retval);
 }
@@ -1371,9 +1379,15 @@ static void *NetworkInputThread(void *data)
         if ((retval=recv(fd, &Buffer, sizeof(TMesssageHeader),0)) != sizeof(TMesssageHeader))
 #endif /*TLS_ENABLE*/
         {
+            #if 0
             if (retval==0) printf("Client Disconnnected\n");
             else printf("Connecton Lost %s\n", strerror(errno));
-            //break;
+            break;
+            #else
+            printf("first recv,%d\r\n", retval);
+            sleep(1);
+            continue;
+            #endif
         }
         MsgHdr=(TMesssageHeader *)Buffer;
         MsgHdr->Len = ntohl(MsgHdr->Len);
@@ -1382,6 +1396,7 @@ static void *NetworkInputThread(void *data)
         if (MsgHdr->Len+sizeof(TMesssageHeader)>sizeof(Buffer))
         {
             printf("oversized message error %d\n",MsgHdr->Len);
+            continue;
             //break;
         }
 
@@ -1391,9 +1406,15 @@ static void *NetworkInputThread(void *data)
          if ((retval=recv(fd, &Buffer[sizeof(TMesssageHeader)],  MsgHdr->Len,0)) !=  MsgHdr->Len)
 #endif /*TLS_ENABLE*/
         {
+            #if 0
             if (retval==0) printf("Client Disconnnected\n");
             else printf("Connecton Lost %s\n", strerror(errno));
             //break;
+            #else
+            printf("second recv,%d\r\n", retval);
+            sleep(1);
+            continue;
+            #endif
         }
 
         switch(MsgHdr->Type)
