@@ -39,6 +39,16 @@ int aes_encrypt_to_file(st_aes* p_this, const unsigned char* plaintext, const in
 unsigned char* aes_encrypt_to_alloc(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, int* p_ciphertext_len);
 void aes_handleErrors(void);
 
+#if !defined(LOG_ENABLE)
+#ifndef PRINTF_EMPTY
+#define PRINTF_EMPTY
+
+static void printf_empty(const char* format, ...) {};
+#define printf printf_empty
+
+#endif /* PRINTF_EMPTY */
+#endif /* LOG_ENABLE */
+
 #endif /*TLS_H_*/
 
 #ifdef __cplusplus
