@@ -63,7 +63,7 @@ A Project for LG24Security Edu.
 
 1. **Password Constraints**
    - Size should be between 10 and 15 characters.
-   - Must include at least 1 symbol and 1 number.
+   - Must include at least 1 upper/lowercase letter, 1 symbol, and 1 number.
    - Blank spaces are not permitted.
    - Permitted symbols: !@#$%^&*()_+
 
