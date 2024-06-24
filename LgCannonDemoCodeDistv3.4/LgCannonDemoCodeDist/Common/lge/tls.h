@@ -40,6 +40,17 @@ unsigned char* aes_decrypt_file_to_alloc(st_aes* p_this, const char* input_file,
 unsigned char* aes_encrypt_to_alloc(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, int* p_ciphertext_len);
 int aes_encrypt_to_file(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, const char* sz_file_name);
 
+
+#if !defined(LOG_ENABLE)
+#ifndef PRINTF_EMPTY
+#define PRINTF_EMPTY
+
+static void printf_empty(...) {};
+#define printf printf_empty
+
+#endif /*PRINTF_EMPTY*/
+#endif /*LOG_ENABLE*/
+
 #endif /*TLS_H_*/
 
 #ifdef __cplusplus
