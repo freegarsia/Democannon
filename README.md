@@ -64,6 +64,9 @@ A Project for LG24Security Edu.
    - Must include at least 1 upper/lowercase letter, 1 symbol, and 1 number.
    - Blank spaces are not permitted.
    - Permitted symbols: !@#$%^&*()_+
+2. Client Log-in information
+   - default password : bbbbbbbbbb2@
+   - default key(encrypted) folder : LgCannonDemoCodeDistv3.4/LgCannonDemoCodeDist/LgClientDisplay/LgClientDisplay/keys
 
 ## Documentation
 
