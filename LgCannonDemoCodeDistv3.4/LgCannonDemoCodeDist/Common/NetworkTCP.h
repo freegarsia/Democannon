@@ -49,20 +49,25 @@ typedef struct
 } TTcpConnectedPort;
 
 //------------------------------------------------------------------------------------------------
-//  Function Prototypes 
+//  Function Prototypes
 //------------------------------------------------------------------------------------------------
 TTcpListenPort *OpenTcpListenPort(short localport);
 void CloseTcpListenPort(TTcpListenPort **TcpListenPort);
-TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort, 
+#if defined(TLS_ENABLE)
+TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
                        struct sockaddr_in *cli_addr,socklen_t *clilen, st_tls* p_tls);
+#else /*TLS_ENABLE*/
+TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
+                       struct sockaddr_in *cli_addr,socklen_t *clilen);
+#endif /*TLS_ENABLE*/
 TTcpConnectedPort *OpenTcpConnection(const char *remotehostname, const char * remoteportno);
 void CloseTcpConnectedPort(TTcpConnectedPort **TcpConnectedPort);
 #if defined(TLS_ENABLE)
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length, const st_tls* p_tls);
 #else /*defined(TLS_ENABLE)*/
 ssize_t ReadDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length);
-#endif 
-#if defined(TLS_ENABLE) 
+#endif
+#if defined(TLS_ENABLE)
 ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length, const st_tls* p_this);
 #else /*TLS_ENABLE*/
 ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length);

@@ -27,6 +27,7 @@
 #if defined(TLS_ENABLE)
 #include <tls.h>
 st_tls tls = {.ctx = NULL, .ssl = NULL};
+st_aes aes;
 int tls_test_server(st_tls* p_this);
 #endif /*TLS_ENABLE*/
 
@@ -145,6 +146,50 @@ static ObjectDetector *detector;
 //------------------------------------------------------------------------------------------------
 // static void ReadOffsets
 //------------------------------------------------------------------------------------------------
+
+int caldata_read_offsets(float* p_xCorrect, float* p_ycorrect, st_aes* p_aes, const char* sz_password)
+{
+    int plaintext_len = 0;
+    unsigned char* plaintext = aes_decrypt_file_to_alloc(p_aes, "Correct.ini", sz_password, &plaintext_len);
+    if (plaintext == NULL || plaintext_len == 0) {
+        printf("cal_read_offsets,fail\r\n");
+        return -1;
+    }
+    float x,y;
+    char xs[100],ys[100];
+    int retval=0;
+
+    retval += sscanf((char*)plaintext, "%s %f", xs, &x);
+    retval += sscanf((char*)plaintext, "%s %f", ys, &y);
+    if (retval==4)
+    {
+        if ((strcmp(xs,"xCorrect")==0) && (strcmp(ys,"yCorrect")==0))
+        {
+            xCorrect = x;
+            yCorrect = y;
+            printf("Read Offsets:\n");
+            printf("xCorrect= %f\n",xCorrect);
+            printf("yCorrect= %f\n",yCorrect);
+        }
+    }
+    if (plaintext != NULL)
+        free(plaintext);
+    return 0;
+}
+
+int caldata_write_offsets(float xCorrect, float yCorrect, st_aes* p_aes)
+{
+    unsigned char buf[256] = {0,};
+    const int len = snprintf((char*)buf, sizeof(buf), "xCorrect %f\nyCorrect %f\n", xCorrect, yCorrect);
+    if (aes_encrypt_to_file(p_aes, buf, len, "Correct.ini") < 0) {
+        printf("caldata_write_offsets:fail,%s", buf);
+        return -1;
+    }
+    printf("caldata_write_offsets:ok,%s", buf);
+    return 0;
+}
+
+
 static void ReadOffsets(void)
 {
    FILE * fp;
@@ -675,28 +720,36 @@ int main(int argc, const char** argv)
     int cert_len = 0;
     int key_len = 0;
 
-    tls_init_openssl();
-    cert = tls_alloc_decrypt_file("server-cert.pem.enc", password, &cert_len);
+    aes_init(&aes);
+    cert = aes_decrypt_file_to_alloc(&aes, "server-cert.pem.enc", password, &cert_len);
     if (cert == NULL) {
         fprintf(stderr, "Decryption failed.1\n");
         exit(EXIT_FAILURE);
     }
     cert[cert_len] = 0;
 
-    key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
-    if (cert == NULL) {
+    key = aes_decrypt_file_to_alloc(&aes, "server-key.pem.enc", password, &key_len);
+    if (key == NULL) {
         fprintf(stderr, "Decryption failed.2\n");
         exit(EXIT_FAILURE);
     }
     key[key_len] = 0;
 
+    tls_init_openssl(&tls);
     tls_create_context(&tls, true);
     tls_configure_context(&tls, true, cert, key, "ca-cert.pem");
+
+
 
     //tls_test_server(&tls);
 #endif /*TLS_ENABLE*/
 
+#if defined(TLS_ENABLE)
+    caldata_read_offsets(&xCorrect, &yCorrect, &aes, password);
+    //caldata_write_offsets(115, 115, &aes);
+#else /*TLS_ENABLE*/
     ReadOffsets();
+#endif /*TLS_ENABLE*/
 
     for (i = 0; i < 16; i++) FPS[i] = 0.0;
 
@@ -1123,7 +1176,13 @@ static void ProcessStateChangeRequest(SystemState_t state)
      if (CalibrateWasOn)
         {
          CalibrateWasOn=false;
+
+#if defined(TLS_ENABLE)
+         caldata_write_offsets(xCorrect, yCorrect, &aes);
+#else /*TLS_ENABLE*/
          WriteOffsets();
+#endif /*TLS_ENABLE*/
+
         }
     }
 

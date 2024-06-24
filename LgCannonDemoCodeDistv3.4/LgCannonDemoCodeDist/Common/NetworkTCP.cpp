@@ -104,8 +104,13 @@ void CloseTcpListenPort(TTcpListenPort **TcpListenPort)
 // AcceptTcpConnection -Accepts a TCP Connection request from a
 // Listening port
 //-----------------------------------------------------------------
+#if defined(TLS_ENABLE)
 TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
                        struct sockaddr_in *cli_addr,socklen_t *clilen, st_tls* p_tls)
+#else /*TLS_ENABLE*/
+TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
+                       struct sockaddr_in *cli_addr,socklen_t *clilen)
+#endif /*TLS_ENABLE*/
 {
   TTcpConnectedPort *TcpConnectedPort;
 
@@ -119,10 +124,12 @@ TTcpConnectedPort *AcceptTcpConnection(TTcpListenPort *TcpListenPort,
   TcpConnectedPort->ConnectedFd= accept(TcpListenPort->ListenFd,
                       (struct sockaddr *) cli_addr,clilen);
 
+#if defined(TLS_ENABLE)
     tls_new_set_fd(p_tls, TcpConnectedPort->ConnectedFd);
     if (SSL_accept(p_tls->ssl) <= 0) {
          tls_handleErrors();
     }
+#endif /*TLS_ENABLE*/
 
 
   if (TcpConnectedPort->ConnectedFd== BAD_SOCKET_FD)
@@ -297,26 +304,26 @@ ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, si
 ssize_t WriteDataTcp(TTcpConnectedPort *TcpConnectedPort,unsigned char *data, size_t length)
 #endif /*TLS_ENABLE*/
 {
-  ssize_t total_bytes_written = 0;
-  ssize_t bytes_written;
-  while (total_bytes_written != length)
+    ssize_t total_bytes_written = 0;
+    ssize_t bytes_written;
+    while (total_bytes_written != length)
     {
 #if defined(TLS_ENABLE)
-     bytes_written = SSL_write(p_this->ssl,
-	                               (char *)(data+total_bytes_written),
-                                  length - total_bytes_written);
+        bytes_written = SSL_write(p_this->ssl,
+        (char *)(data+total_bytes_written),
+        length - total_bytes_written);
 #else /*TLS_ENABLE*/
-    bytes_written = send(TcpConnectedPort->ConnectedFd,
-                              (char *)(data+total_bytes_written),
-                             length - total_bytes_written,0);
+        bytes_written = send(TcpConnectedPort->ConnectedFd,
+        (char *)(data+total_bytes_written),
+        length - total_bytes_written,0);
 #endif /*TLS_ENABLE*/
-     if (bytes_written == -1)
-       {
-       return(-1);
-      }
-     total_bytes_written += bytes_written;
-   }
-   return(total_bytes_written);
+        if (bytes_written == -1)
+        {
+            return(-1);
+        }
+        total_bytes_written += bytes_written;
+    }
+    return(total_bytes_written);
 }
 //-----------------------------------------------------------------
 // END WriteDataTcp

@@ -41,12 +41,10 @@ openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11
 // Buffer size for reading file
 #define BUFFER_SIZE 4096
 
-void tls_init_openssl() {
+void tls_init_openssl(st_tls* p_this) {
+    memset(p_this, 0, sizeof(*p_this));
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
-
-    ERR_load_crypto_strings();
-    OpenSSL_add_all_algorithms();
 }
 
 void tls_handleErrors(void)
@@ -162,6 +160,185 @@ void tls_configure_context(st_tls* p_this, const bool is_for_server, const unsig
 openssl enc -aes-256-cbc -salt -in client-key.pem  -out client-key.pem.enc -k 11112222
 openssl enc -d -aes-256-cbc -in client-key.pem.enc -out client-key.pem.dec -k 11112222
 */
+void aes_init(st_aes* p_this)
+{
+    memset(p_this, 0, sizeof(*p_this));
+    ERR_load_crypto_strings();
+    OpenSSL_add_all_algorithms();
+}
+
+void aes_handleErrors(void)
+{
+    ERR_print_errors_fp(stderr);
+    //abort();
+}
+
+int aes_get_salt_of_file_header(st_aes* p_this, FILE *ifp)
+{
+    // Read the magic text and salt from the file
+    unsigned char magic[8];
+    if (fread(magic, 1, 8, ifp) != 8 || strncmp((const char *)magic, "Salted__", 8) != 0) {
+        fprintf(stderr, "No salt header found in the file\n");
+        return -1;
+    }
+
+    if (fread(p_this->salt, 1, 8, ifp) != 8) {
+        fprintf(stderr, "Failed to read salt\n");
+        return -1;
+    }
+
+    // Output the salt
+    printf("Salt: ");
+    for (int i = 0; i < 8; i++)
+        printf("%02x", p_this->salt[i]);
+    printf("\n");
+    return 0;
+}
+
+int aes_get_key_iv_of_password(st_aes* p_this, const char* sz_password)
+{
+    // Derive the key and IV
+    const EVP_CIPHER *cipher = EVP_aes_256_cbc();
+    const EVP_MD *dgst = EVP_sha256();
+
+    if (!EVP_BytesToKey(cipher, dgst, p_this->salt, (unsigned char *)sz_password, strlen(sz_password), 1, p_this->key, p_this->iv)) {
+        tls_handleErrors();
+        return -1;
+    }
+
+    // Output the key
+    printf("Key: ");
+    for (int i = 0; i < EVP_CIPHER_key_length(cipher); i++)
+        printf("%02x", p_this->key[i]);
+    printf("\n");
+
+    // Output the IV
+    printf("IV: ");
+    for (int i = 0; i < EVP_CIPHER_iv_length(cipher); i++)
+        printf("%02x", p_this->iv[i]);
+    printf("\n");
+
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        tls_handleErrors();
+        return -1;
+    }
+
+    if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, p_this->key, p_this->iv)) {
+        tls_handleErrors();
+        return -1;
+    }
+    return 0;
+}
+
+unsigned char* aes_decrypt_file_to_alloc(st_aes* p_this, const char* input_file, const char *password, int *decrypted_len) {
+    FILE *ifp = fopen(input_file, "rb");
+    if (!ifp) {
+        perror("File opening failed");
+        return NULL;
+    }
+    if (aes_get_salt_of_file_header(p_this, ifp) < 0) {
+        return NULL;
+    }
+    if (aes_get_key_iv_of_password(p_this, password) < 0) {
+        return NULL;
+    }
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        tls_handleErrors();
+        return NULL;
+    }
+
+    if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, p_this->key, p_this->iv)) {
+        tls_handleErrors();
+        return NULL;
+    }
+
+    unsigned char inbuf[BUFFER_SIZE + EVP_MAX_BLOCK_LENGTH];
+    unsigned char *outbuf = NULL;
+    int outbuf_len = 0;
+    int inlen, outlen;
+
+    while ((inlen = fread(inbuf, 1, BUFFER_SIZE, ifp)) > 0) {
+        outbuf = (unsigned char*)realloc(outbuf, outbuf_len + inlen + EVP_MAX_BLOCK_LENGTH);
+        if (!outbuf) {
+            perror("Memory allocation failed");
+            return NULL;
+        }
+
+        if (1 != EVP_DecryptUpdate(ctx, outbuf + outbuf_len, &outlen, inbuf, inlen)) {
+            tls_handleErrors();
+            return NULL;
+        }
+        outbuf_len += outlen;
+    }
+
+    if (1 != EVP_DecryptFinal_ex(ctx, outbuf + outbuf_len, &outlen)) {
+        tls_handleErrors();
+        return NULL;
+    }
+    outbuf_len += outlen;
+
+    EVP_CIPHER_CTX_free(ctx);
+    fclose(ifp);
+
+    *decrypted_len = outbuf_len;
+    return outbuf;
+}
+
+unsigned char* aes_encrypt_to_alloc(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, int* p_ciphertext_len)
+{
+    EVP_CIPHER_CTX *ctx;
+    int len, ciphertext_len;
+
+    // Allocate memory for ciphertext
+    int ciphertext_max_len = plaintext_len + EVP_MAX_BLOCK_LENGTH;
+    unsigned char *ciphertext = (unsigned char*)malloc(ciphertext_max_len);
+    if (!ciphertext) {
+        perror("Unable to allocate memory for ciphertext");
+        abort();
+    }
+
+    if (!(ctx = EVP_CIPHER_CTX_new())) aes_handleErrors();
+
+    if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, p_this->key, p_this->iv))
+        aes_handleErrors();
+
+    if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len))
+        aes_handleErrors();
+    ciphertext_len = len;
+
+    if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + len, &len))
+        aes_handleErrors();
+    ciphertext_len += len;
+
+    *p_ciphertext_len = ciphertext_len;
+    return ciphertext;
+}
+
+int aes_encrypt_to_file(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, const char* sz_file_name)
+{
+    int ciphertext_len = 0;
+    unsigned char* ciphertext = aes_encrypt_to_alloc(p_this, plaintext, plaintext_len, &ciphertext_len);
+    if (ciphertext == NULL || ciphertext_len == 0) {
+        return -1;
+    }
+
+    FILE *ifp = fopen(sz_file_name, "wb");
+    if (!ifp) {
+        perror("File opening failed");
+        return -1;
+    }
+    // Write salt and encrypted data to file
+    const char sz_salt_magic[] = "Salted__";
+    fwrite(sz_salt_magic, 1, sizeof(sz_salt_magic)-1, ifp);
+    fwrite(p_this->salt, 1, sizeof(p_this->salt), ifp);
+    fwrite(ciphertext, 1, ciphertext_len, ifp);
+    free(ciphertext);
+    return 0;
+}
+
+#if 0
 unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *password, int *decrypted_len) {
     FILE *ifp = fopen(input_file, "rb");
     if (!ifp) {
@@ -255,6 +432,7 @@ unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *passwo
     *decrypted_len = outbuf_len;
     return outbuf;
 }
+#endif
 
 
 //#define TEST
@@ -293,7 +471,7 @@ int main(int argc, char **argv) {
 
     int key_len = 0;
     key = tls_alloc_decrypt_file("server-key.pem.enc", password, &key_len);
-    if (cert == NULL) {
+    if (key == NULL) {
         fprintf(stderr, "Decryption failed.2\n");
         exit(EXIT_FAILURE);
     }
@@ -301,9 +479,9 @@ int main(int argc, char **argv) {
 #endif /*defined(KEY_ENCRYPTED)*/
 
 #if defined(SERVER)
-    bool is_for_server = true;
+    const bool is_for_server = true;
 #else
-    bool is_for_server = false;
+    const bool is_for_server = false;
 #endif
 
     tls_init_openssl();
