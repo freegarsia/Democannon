@@ -22,7 +22,7 @@ enum InputMode { MsgHeader, Msg };
 static  std::vector<uchar> sendbuff;//buffer for coding
 static HANDLE hClientEvent = INVALID_HANDLE_VALUE;
 static HANDLE hEndClientEvent = INVALID_HANDLE_VALUE;
-static SOCKET Client = INVALID_SOCKET;
+SOCKET Client = INVALID_SOCKET;
 static SSL* ssl = NULL;
 static SSL_CTX* ctx = NULL;
 
@@ -75,28 +75,6 @@ bool SendCodeToSever(unsigned char Code)
             return true;
         }
 
-    }
-    return false;
-}
-
-bool SendPasswordToServer(unsigned char* msg)
-{
-    if (IsClientConnected())
-    {
-        //SSL_write(ssl, "test1234", strlen("test1234"));
-        //return true;
-
-        TMesssagePWCommands MsgCmd;
-        int msglen = sizeof(TMesssageHeader) + sizeof(unsigned char);
-        //printf("Message len %d\n", msglen);
-        MsgCmd.Hdr.Len = htonl(sizeof(unsigned char));
-        MsgCmd.Hdr.Type = htonl(MT_CHANGE_PASSWORD);
-        MsgCmd.pw = msg;
-
-        if (WriteDataTLS(ssl, (unsigned char*)&MsgCmd, msglen) == msglen)
-        {
-            return true;
-        }
     }
     return false;
 }
@@ -179,28 +157,37 @@ bool SendStateChangeRequestToSever(SystemState_t State)
     return false;
 }
 
+unsigned char* get_client_cert(void);
+unsigned char* get_client_key(void);
+char* get_ca_cert(void);
+
 void ConfigureContext(SSL_CTX* ctx) {
-    extern unsigned char* client_cert;
-    extern unsigned char* client_key;
-    extern unsigned char* ca_cert;
+    unsigned char* client_cert;
+    unsigned char* client_key;
+    char* ca_cert;
+    
+    client_cert = get_client_cert();
+    client_key = get_client_key();
+    ca_cert = get_ca_cert();
 
-    // 클라이언트 인증서를 설정합니다.
-    if (SSL_CTX_use_certificate_file(ctx, "C:/keys/client-cert.pem", SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stdout);
-        exit(EXIT_FAILURE);
-    }
-    if (SSL_CTX_use_PrivateKey_file(ctx, "C:/keys/client-key.pem", SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stdout);
-        exit(EXIT_FAILURE);
-    }
+    tls_configure_context(ctx, client_cert, client_key, ca_cert);
 
-    if (SSL_CTX_load_verify_locations(ctx, "C:/keys/ca-cert.pem", NULL) <= 0) {
-        ERR_print_errors_fp(stdout);
-        exit(EXIT_FAILURE);
-    }
+    //if (SSL_CTX_use_certificate_file(ctx, "C:/keys/client-cert.pem", SSL_FILETYPE_PEM) <= 0) {
+    //    ERR_print_errors_fp(stdout);
+    //    exit(EXIT_FAILURE);
+    //}
+    //if (SSL_CTX_use_PrivateKey_file(ctx, "C:/keys/client-key.pem", SSL_FILETYPE_PEM) <= 0) {
+    //    ERR_print_errors_fp(stdout);
+    //    exit(EXIT_FAILURE);
+    //}
 
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    SSL_CTX_set_verify_depth(ctx, 4);
+    //if (SSL_CTX_load_verify_locations(ctx, "C:/keys/ca-cert.pem", NULL) <= 0) {
+    //    ERR_print_errors_fp(stdout);
+    //    exit(EXIT_FAILURE);
+    //}
+
+    //SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+    //SSL_CTX_set_verify_depth(ctx, 4);
 }
 
 bool ConnectToSever(const char* remotehostname, unsigned short remoteport)
@@ -413,6 +400,64 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
     NumEvents = 2;
 
     while (1) {
+        {
+            int iResult;
+            //Sleep(10);
+            //iResult = ReadDataTcpNoBlock(Client, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+            iResult = ReadDataTLSNoBlock(ssl, (unsigned char*)InputBufferWithOffset, InputBytesNeeded);
+            if (iResult > 0)
+            {
+                if (iResult == 1)   // new line character is received
+                {
+                    Mode = MsgHeader;
+                    InputBytesNeeded = sizeof(TMesssageHeader);
+                    InputBufferWithOffset = InputBuffer;
+                    PostMessage(hWndMain, WM_CLIENT_LOST, 0, 0);
+                    std::cout << "Connection closed on Recv" << std::endl;
+                    break;
+                }
+                else
+                {
+                    InputBytesNeeded -= iResult;
+                    InputBufferWithOffset += iResult;
+                    if (InputBytesNeeded == 0)
+                    {
+                        if (Mode == MsgHeader)
+                        {
+                            InputBufferWithOffset = InputBuffer + sizeof(TMesssageHeader);
+                            memcpy(&MsgHdr, InputBuffer, sizeof(TMesssageHeader));
+                            MsgHdr.Len = ntohl(MsgHdr.Len);
+                            MsgHdr.Type = ntohl(MsgHdr.Type);
+                            InputBytesNeeded = MsgHdr.Len;
+                            Mode = Msg;
+                            if ((InputBytesNeeded + sizeof(TMesssageHeader)) > CurrentInputBufferSize)
+                            {
+                                CurrentInputBufferSize = InputBytesNeeded + sizeof(TMesssageHeader) + (10 * 1024);
+                                InputBuffer = (char*)std::realloc(InputBuffer, CurrentInputBufferSize);
+                                if (InputBuffer == NULL)
+                                {
+                                    std::cout << "std::realloc failed " << std::endl;
+                                    ExitProcess(0);
+                                }
+                                InputBufferWithOffset = InputBuffer + sizeof(TMesssageHeader);
+                            }
+
+                        }
+                        else if (Mode == Msg)
+                        {
+                            ProcessMessage(InputBuffer);
+                            // Setup for next message
+                            Mode = MsgHeader;
+                            InputBytesNeeded = sizeof(TMesssageHeader);
+                            InputBufferWithOffset = InputBuffer;
+                        }
+                    }
+
+                }
+            }
+        }
+    }
+#if 0
         dwEvent = WaitForMultipleObjects(
             NumEvents,        // number of objects in array
             ghEvents,       // array of objects
@@ -536,6 +581,7 @@ static DWORD WINAPI ThreadClient(LPVOID ivalue)
 
         }
     }
+#endif
     if (InputBuffer)
     {
         std::free(InputBuffer);

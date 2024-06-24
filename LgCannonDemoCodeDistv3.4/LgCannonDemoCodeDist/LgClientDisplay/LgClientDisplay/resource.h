@@ -20,9 +20,10 @@
 #define IDC_LOAD_KEY                    1000
 #define IDC_KEY_LOC                     1001
 #define IDC_USER_PASSWORD               1002
-#define IDC_CH_PW1                      1002
-#define IDC_EDIT2                       1003
+#define IDC_NEW_PW                      1002
 #define IDC_CH_PW2                      1003
+#define IDC_NEW_PW_2                    1003
+#define IDC_CURRENT_PW                  1004
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
