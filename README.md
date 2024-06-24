@@ -9,18 +9,12 @@ A Project for LG24Security Edu.
    - A. Clone vcpkg repository: `git clone https://github.com/microsoft/vcpkg.git`
    - B. Navigate to vcpkg directory: `cd vcpkg`
    - C. Run bootstrap script: `bootstrap-vcpkg.bat`
-
-2. **Visual Studio 2022 Configuration**
-   - A. Add include folder:
+   - D. Add include folder:
      - `Configuration Properties > C/C++ > General > Additional Include Directories`: vcpkg Installation Path
-   - B. Add lib folder:
+   - E. Add lib folder:
      - `Configuration Properties > Linker > General > Additional Library Directories`: vcpkg Installation Path
 
-### General Procedure
-
-#### I. Setup
-
-1. **Install Packages and Libraries for Client**
+3. **Install Packages and Libraries for Client**
    - **OpenCV Installation:**
      - a) Download and Extract OpenCV:
        - Download OpenCV 4.9.0 from [official website](https://opencv.org/releases/).
@@ -39,13 +33,17 @@ A Project for LG24Security Edu.
          - Add:
            - Debug mode: `opencv_world490d.lib`
            - Release mode: `opencv_world490.lib`
+   - **OpenSSL Installation:**
+     - a) `Project > Properties > Configuration Properties > Linker > Input > Additional Dependencies`.
+       - Add "libcrypto.lib" & "libssl.lib"
 
    - **Install Visual Studio Packages: Cryptopp, spdlog, openssl**
      ```shell
      $ vcpkg search cryptopp
      $ vcpkg install cryptopp
      $ vcpkg integrate install
-     ```
+     $ vcpkg install spdlog
+     $ vcpkg install openssl
 
 #### II. How to Build
 
