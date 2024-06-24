@@ -25,6 +25,7 @@
 #include <cryptopp/filters.h>
 #include <cryptopp/osrng.h>
 #include <cryptopp/base64.h>
+#include <cryptopp/md5.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -78,22 +79,25 @@ static HINSTANCE hInst;                                // current instance
 static WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 static WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
-static char RemoteAddress[512]="raspberrypi.local";
+//static char RemoteAddress[512]="raspberrypi.local";
+static char RemoteAddress[512] = "192.168.8.1";
+
 static char EngagementOrder[512] = "0123456789";
 static char PreArmCode[512] = "";
-
+const char* loggerFilePath = "cannon.log";
 static TCHAR userPassword[MAX_PASSWORD_LENGTH] = _T("");
 static TCHAR filePath[MAX_FILEPATH_LENGTH] = _T("");
 static bool is_password_same = false;
 static TCHAR password_for_change[MAX_PASSWORD_LENGTH] = _T("");
-static unsigned char* server_cert;
-static unsigned char* server_key;
 static unsigned char* client_cert;
 static unsigned char* client_key;
-static unsigned char* ca_cert;
+static int client_cert_length = 0;
+static int client_key_length = 0;
 
-static byte default_logger_key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
-static byte default_logger_iv[AES::BLOCKSIZE] = { /* 16 바이트 IV 값 */ };
+static char ca_cert[MAX_FILEPATH_LENGTH];
+
+static byte logger_key[AES::DEFAULT_KEYLENGTH] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F };
+static byte logger_iv[AES::BLOCKSIZE] = { };
 
 
 static FILE* pCout = NULL;
@@ -118,6 +122,56 @@ static void SetStdOutToNewConsole(void);
 static void DisplayMessageOkBox(const char* Msg);
 static bool OnlyOneInstance(void);
 
+unsigned char* get_client_cert(void);
+unsigned char* get_client_key(void);
+char* get_ca_cert(void);
+byte* get_logger_key(void);
+byte* get_logger_iv(void);
+
+unsigned char* get_client_cert(void) { return client_cert;}
+unsigned char* get_client_key(void) { return client_key;}
+char* get_ca_cert(void) {return ca_cert;}
+byte* get_logger_key(void) { return logger_key; }
+byte* get_logger_iv(void) { return logger_iv; }
+
+bool check_password_rule(TCHAR* pw)
+{
+    int length = _tcslen(pw);
+    if (length < 10 or length > 15)
+        return false;
+    else if(_tcsstr(pw, _T(" ")) != nullptr )
+        return false;
+    else
+    {
+        std::string symbols = "!@#$%^&*()_+";
+        int digit_count = 0;
+        int symbol_count = 0;
+        int alphabet_count = 0;
+
+        for (int i = 0; pw[i] != _T('\0'); ++i) {
+            TCHAR ch = pw[i];
+
+            if (_istalpha(ch))
+                alphabet_count++;
+            else if (_istdigit(ch)) {  // Check if digit
+                digit_count++;
+            }
+
+            for (int j = 0; symbols[j] != _T('\0'); ++j) {
+                if (ch == symbols[j]) {
+                    symbol_count++;
+                    break;
+                }
+            }
+        }
+
+        if (digit_count == 0 || symbol_count == 0 || alphabet_count == 0) {
+            return false;
+        }
+
+    }
+    return true;
+}
 
 INT_PTR CALLBACK DialogProc_PW(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -131,32 +185,64 @@ INT_PTR CALLBACK DialogProc_PW(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         switch (LOWORD(wParam))
         {
         case IDOK:
+            TCHAR current_password[MAX_PASSWORD_LENGTH];
             TCHAR password_1[MAX_PASSWORD_LENGTH];
             TCHAR password_2[MAX_PASSWORD_LENGTH];
 
-            GetDlgItemText(hDlg, IDC_CH_PW1, password_1, MAX_PASSWORD_LENGTH);
-            GetDlgItemText(hDlg, IDC_CH_PW2, password_2, MAX_PASSWORD_LENGTH);
+            GetDlgItemText(hDlg, IDC_CURRENT_PW, current_password, MAX_PASSWORD_LENGTH);
+            GetDlgItemText(hDlg, IDC_NEW_PW, password_1, MAX_PASSWORD_LENGTH);
+            GetDlgItemText(hDlg, IDC_NEW_PW_2, password_2, MAX_PASSWORD_LENGTH);
 
-            if (_tcscmp(password_1, password_2) == 0)
+            if (_tcscmp(userPassword, current_password) != 0)
+            {
+                DisplayMessageOkBox("Current Password is not correct!");
+            }
+            else if (_tcscmp(password_1, password_2) != 0)
+            {
+                DisplayMessageOkBox("new Passwords are not same");
+            }
+            else if (check_password_rule(password_1) == false)
+            {
+                DisplayMessageOkBox("new Passwords is not matched to rule");
+            }
+            else
             {
                 std::cout << "password is same" << std::endl;
                 is_password_same = true;
                 _tcscpy_s(password_for_change, MAX_PASSWORD_LENGTH, password_1);
-            } 
-            else 
-            {
-                std::cout << "password is differenct" << std::endl;
-                is_password_same = false;
+                EndDialog(hDlg, LOWORD(wParam));
+                return (INT_PTR)TRUE;
             }
-
-            EndDialog(hDlg, LOWORD(wParam));
-            return (INT_PTR)TRUE;
+            break;
         case IDCANCEL:
             EndDialog(hDlg, LOWORD(wParam));
             return (INT_PTR)TRUE;
         }
     }
     return (INT_PTR)FALSE;
+}
+std::string TCHARToString(const TCHAR* tcharString) {
+#ifdef _UNICODE
+    // TCHAR이 wchar_t일 때
+    int len = WideCharToMultiByte(CP_UTF8, 0, tcharString, -1, nullptr, 0, nullptr, nullptr);
+    std::string result(len - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, tcharString, -1, &result[0], len, nullptr, nullptr);
+    return result;
+#else
+    // TCHAR이 char일 때
+    return std::string(tcharString);
+#endif
+}
+bool make_key_and_iv(st_aes* p_this, const char* base, byte* key, byte* iv)
+{
+    ERR_load_crypto_strings();
+    OpenSSL_add_all_algorithms();
+
+    aes_get_key_iv_of_password(p_this, (const char*)base);
+    key = p_this->key;
+    iv = p_this->iv;
+
+    return true;
 }
 
 bool OpenFolderDialog(HWND hwndOwner, TCHAR* selectedFolder, int bufferSize) {
@@ -251,7 +337,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // Logging config
     try {
         // Create a file logger
-        Logger = spdlog::basic_logger_mt("audit_log", "./cannon.log");
+        Logger = spdlog::basic_logger_mt("audit_log", loggerFilePath);
     }
     catch (const spdlog::spdlog_ex& ex) {
         DisplayMessageOkBox("Log initialization failed");
@@ -280,17 +366,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // show file explore as modal to load public keys
     INT_PTR ret = DialogBoxW(hInstance, MAKEINTRESOURCE(IDD_LOAD_KEYS), NULL, DialogProc);
     if (ret == IDOK) {
-        wchar_t OK_msg[] = L"OK is clicked";
         cannonLogger_info("Try Key file decryption");
         
-        int decrypted_len = 0;
-
         if (filePath[0] == _T('\0') || userPassword[0] == _T('\0')) {
             DisplayMessageOkBox("Key path and Password is not inserted!!");
-            //return 1;
+            return 1;
         }
 
         try{
+            ////////////////////////////////////////////
+            // set logger key and iv from user password
+            ////////////////////////////////////////////
+            st_aes* p_this = (st_aes*)malloc(sizeof(st_aes));
+            memset(p_this, 0, sizeof(*p_this));
+            
             char filePathWithFileName[256];
             char converted_filaPath[256];
             char converted_password[256];
@@ -303,33 +392,31 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             wcstombs_s(&convertedChars, converted_filaPath, filePath_size, filePath, _TRUNCATE);
             wcstombs_s(&convertedChars2, converted_password, password_size, userPassword, _TRUNCATE);
 
+            make_key_and_iv(p_this, converted_password, logger_key, logger_iv);
+
             // set file path
             strcpy_s(filePathWithFileName, converted_filaPath);
-            strcat_s(filePathWithFileName, "\\server-cert.pem.enc");
-            server_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
-
-            strcpy_s(filePathWithFileName, converted_filaPath);
-            strcat_s(filePathWithFileName, "\\server-key.pem.enc");
-            server_key = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
-
-            strcpy_s(filePathWithFileName, converted_filaPath);
             strcat_s(filePathWithFileName, "\\client-cert.pem.enc");
-            client_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+            client_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &client_cert_length);
 
             strcpy_s(filePathWithFileName, converted_filaPath);
             strcat_s(filePathWithFileName, "\\client-key.pem.enc");
-            client_key = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+            client_key = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &client_key_length);
 
-            strcpy_s(filePathWithFileName, converted_filaPath);
-            strcat_s(filePathWithFileName, "\\ca-cert.pem.enc");
-            ca_cert = tls_alloc_decrypt_file(filePathWithFileName, converted_password, &decrypted_len);
+            strcpy_s(ca_cert, converted_filaPath);
+            strcat_s(ca_cert, "\\ca-cert.pem");
 
+            if (client_cert == NULL || client_cert_length < 2)
+            {
+                DisplayMessageOkBox("Password is not correct!");
+                return 1;
+            }
             //std::cout << "Decrypted text: " << server_cert << "," << server_key << std::endl;
         }
         catch (const CryptoPP::Exception& e)
         {
             DisplayMessageOkBox("Password is not correct! Or There are no keys on the Folder.");
-            //return 1;
+            return 1;
         }
     }
     else if (ret == IDCANCEL) {
@@ -682,10 +769,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
                     cannonLogger_info("Try to change password");
                     // if password is same inserted, then send password to server
                     if (is_password_same == true) {
-                        is_password_same = false;
                         OnChangePassword(hWnd, message, wParam, lParam);
                     }
-
                 }
                 else if (ret == IDCANCEL) {
                     cannonLogger_info("Changing password is canceled");
@@ -1088,25 +1173,74 @@ static int OnConnect(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
+
+void restart_me()
+{
+    // get Current program path
+    TCHAR szModule[MAX_PATH];
+    GetModuleFileName(NULL, szModule, MAX_PATH);
+
+    // restart
+    STARTUPINFO si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    BOOL success = CreateProcess(szModule, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+
+    // 현재 프로세스 종료
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    ExitProcess(1);
+}
+
 static int OnChangePassword(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    if (IsClientConnected())
+    /*
+    1) 기존의 pem.enc 를 새로운 키를 이용하여 대체함
+    2) log file 을 삭제함
+    3) 프로그램 restart
+    */
+    byte new_key[AES::DEFAULT_KEYLENGTH];
+    byte new_iv[AES::BLOCKSIZE];
+
+    if (is_password_same == true)
     {
-        unsigned char converted[MAX_PASSWORD_LENGTH];
+        st_aes* p_this = (st_aes*)malloc(sizeof(st_aes));
+        memset(p_this, 0, sizeof(*p_this));
+
+        char filePathWithFileName[256];
+        char converted_filaPath[256];
+        char converted_password[256];
+
+        size_t filePath_size = sizeof(converted_filaPath);
+        size_t password_size = sizeof(converted_password);
+
         size_t convertedChars = 0;
+        size_t convertedChars2 = 0;
 
-#ifdef _UNICODE
-        errno_t err = wcstombs_s(&convertedChars, reinterpret_cast<char*>(converted), MAX_PASSWORD_LENGTH, password_for_change, _TRUNCATE);
-#else
-        errno_t err = mbstombs_s(&convertedChars, reinterpret_cast<char*>(converted), MAX_PASSWORD_LENGTH, password_for_change, _TRUNCATE);
-#endif
+        wcstombs_s(&convertedChars, converted_filaPath, filePath_size, filePath, _TRUNCATE);
+        wcstombs_s(&convertedChars2, converted_password, password_size, password_for_change, _TRUNCATE);
 
-        if (err != 0) {
-            std::cout << "Error in conversion: " << err << std::endl;
-            return 1;
+        make_key_and_iv(p_this, converted_password, new_key, new_iv);
+
+        // set file path
+        strcpy_s(filePathWithFileName, converted_filaPath);
+        strcat_s(filePathWithFileName, "\\client-cert.pem.enc");
+        aes_encrypt_to_file(p_this, client_cert, client_cert_length, filePathWithFileName);
+
+        strcpy_s(filePathWithFileName, converted_filaPath);
+        strcat_s(filePathWithFileName, "\\client-key.pem.enc");
+        aes_encrypt_to_file(p_this, client_key, client_key_length, filePathWithFileName);
+
+        Logger->sinks()[0].reset();
+        Logger = NULL;
+        Sleep(1000);
+        if (DeleteFileW((LPCWSTR)loggerFilePath)) {
+            std::cout << L"file is deleted : " << loggerFilePath << std::endl;
         }
-
-        SendPasswordToServer(converted);
+        else {
+            DWORD error = GetLastError();
+            std::cout << L"failed to delete a file with : " << error << std::endl;
+        }
+        restart_me();
     }
     return 1;
 }

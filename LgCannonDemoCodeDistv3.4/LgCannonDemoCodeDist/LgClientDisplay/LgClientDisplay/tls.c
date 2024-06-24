@@ -235,3 +235,154 @@ unsigned char* tls_alloc_decrypt_file(const char *input_file, const char *passwo
     *decrypted_len = outbuf_len;
     return outbuf;
 }
+
+void encrypt_and_save(unsigned char* data, int data_len, const char* outputFilename, unsigned char* key, unsigned char* iv) {
+    EVP_CIPHER_CTX* ctx;
+    int len, ciphertext_len;
+    unsigned char* ciphertext;
+    int block_size;
+
+    // 암호화 설정
+    ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        tls_handleErrors();
+    }
+
+    if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv)) {
+        tls_handleErrors();
+    }
+
+    // 암호화 수행
+    block_size = EVP_CIPHER_block_size(EVP_aes_256_cbc());
+    ciphertext = malloc(data_len + block_size);
+    if (!ciphertext) {
+        EVP_CIPHER_CTX_free(ctx);
+        fprintf(stderr, "Failed to allocate memory.\n");
+        abort();
+    }
+
+    if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len, data, data_len)) {
+        EVP_CIPHER_CTX_free(ctx);
+        free(ciphertext);
+        tls_handleErrors();
+    }
+    ciphertext_len = len;
+
+    if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + len, &len)) {
+        EVP_CIPHER_CTX_free(ctx);
+        free(ciphertext);
+        tls_handleErrors();
+    }
+    ciphertext_len += len;
+
+    // 암호화된 데이터를 출력 파일에 쓰기
+    writeFile(outputFilename, ciphertext, ciphertext_len);
+
+    // 정리
+    EVP_CIPHER_CTX_free(ctx);
+    free(ciphertext);
+}
+
+void writeFile(const char* filename, unsigned char* data, int data_len) {
+    FILE* file = fopen(filename, "wb");
+    if (!file) {
+        fprintf(stderr, "Failed to open file : %s\n", filename);
+        abort();
+    }
+    fwrite(data, 1, data_len, file);
+    fclose(file);
+}
+
+int aes_get_key_iv_of_password(st_aes* p_this, const char* sz_password)
+{
+    // Derive the key and IV
+    const EVP_CIPHER* cipher = EVP_aes_256_cbc();
+    const EVP_MD* dgst = EVP_sha256();
+
+    if (!EVP_BytesToKey(cipher, dgst, p_this->salt, (unsigned char*)sz_password, strlen(sz_password), 1, p_this->key, p_this->iv)) {
+        tls_handleErrors();
+        return -1;
+    }
+
+    // Output the key
+    printf("Key: ");
+    for (int i = 0; i < EVP_CIPHER_key_length(cipher); i++)
+        printf("%02x", p_this->key[i]);
+    printf("\n");
+
+    // Output the IV
+    printf("IV: ");
+    for (int i = 0; i < EVP_CIPHER_iv_length(cipher); i++)
+        printf("%02x", p_this->iv[i]);
+    printf("\n");
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        tls_handleErrors();
+        return -1;
+    }
+
+    if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, p_this->key, p_this->iv)) {
+        tls_handleErrors();
+        return -1;
+    }
+    return 0;
+}
+
+int aes_encrypt_to_file(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, const char* sz_file_name)
+{
+    int ciphertext_len = 0;
+    unsigned char* ciphertext = aes_encrypt_to_alloc(p_this, plaintext, plaintext_len, &ciphertext_len);
+    if (ciphertext == NULL || ciphertext_len == 0) {
+        return -1;
+    }
+
+    FILE* ifp = fopen(sz_file_name, "wb");
+    if (!ifp) {
+        perror("File opening failed");
+        return -1;
+    }
+    // Write salt and encrypted data to file
+    const char sz_salt_magic[] = "Salted__";
+    fwrite(sz_salt_magic, 1, sizeof(sz_salt_magic) - 1, ifp);
+    fwrite(p_this->salt, 1, sizeof(p_this->salt), ifp);
+    fwrite(ciphertext, 1, ciphertext_len, ifp);
+    free(ciphertext);
+    return 0;
+}
+
+unsigned char* aes_encrypt_to_alloc(st_aes* p_this, const unsigned char* plaintext, const int plaintext_len, int* p_ciphertext_len)
+{
+    EVP_CIPHER_CTX* ctx;
+    int len, ciphertext_len;
+
+    // Allocate memory for ciphertext
+    int ciphertext_max_len = plaintext_len + EVP_MAX_BLOCK_LENGTH;
+    unsigned char* ciphertext = (unsigned char*)malloc(ciphertext_max_len);
+    if (!ciphertext) {
+        perror("Unable to allocate memory for ciphertext");
+        abort();
+    }
+
+    if (!(ctx = EVP_CIPHER_CTX_new())) aes_handleErrors();
+
+    if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, p_this->key, p_this->iv))
+        aes_handleErrors();
+
+    if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len))
+        aes_handleErrors();
+    ciphertext_len = len;
+
+    if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + len, &len))
+        aes_handleErrors();
+    ciphertext_len += len;
+
+    *p_ciphertext_len = ciphertext_len;
+    return ciphertext;
+}
+
+void aes_handleErrors(void)
+{
+    ERR_print_errors_fp(stderr);
+    //abort();
+}

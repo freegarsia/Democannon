@@ -46,9 +46,13 @@ int ReadDataTcpNoBlock(SOCKET socket, unsigned char* data, int length)
     return(recv(socket, (char*)data, length, 0));
 }
 
+extern SOCKET Client;
+
 int ReadDataTLSNoBlock(SSL* ssl, unsigned char* data, int length)
 {
-    cannonLogger_info("ReadDataTLSNoBlock");
+    //return (ReadDataTcpNoBlock(Client, data, length));
+
+    //cannonLogger_info("ReadDataTLSNoBlock");
     int bytes_read = SSL_read(ssl, (char *)data, length);
     if (bytes_read <= 0) {
         int err = SSL_get_error(ssl, bytes_read);
@@ -106,6 +110,8 @@ int WriteDataTcp(SOCKET socket, unsigned char* data, int length)
 
 int WriteDataTLS(SSL* ssl, unsigned char* message, int length)
 {
+    //return (WriteDataTcp(Client, message, length));
+
     int len = sizeof(message);
     SSL_write(ssl, message, length);
     cannonLogger_info((const char*)message);
