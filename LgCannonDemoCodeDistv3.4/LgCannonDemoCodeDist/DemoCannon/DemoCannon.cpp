@@ -717,8 +717,15 @@ int main(int argc, const char** argv)
         fprintf(stderr, "Usage: %s <password>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
+    char password[33] = {0,};
+    const int argv_len = strnlen(argv[1], sizeof(password));
+    if (argv_len >= sizeof(password) {
+        printf("password input is larger than limit,%i\r\n", argv_len);
+        return -1;
+    }
+    strncpy(password, argv[1], sizeof(password)-1);
+    password[sizeof(password)-1] = 0;
 
-    const char *password = argv[1];
     unsigned char* cert = NULL;
     unsigned char* key = NULL;
     int cert_len = 0;
